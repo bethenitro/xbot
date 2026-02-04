@@ -118,6 +118,9 @@ class WebGUIServer:
         self.proxy_manager = ProxyManager(config)
         self.account_manager = AccountManager(config)
         
+        # Initialize post manager (will be set by main application)
+        self.post_manager = None
+        
         # Bot state
         self.is_running = False
         self.current_operation = None
@@ -357,6 +360,9 @@ class WebGUIServer:
                     message = f'Account {username} login completed successfully'
                     self.broadcast_log_entry(message)
                     
+                    # Broadcast status update to refresh dashboard
+                    self.broadcast_status_update()
+                    
                     return jsonify({'success': True, 'message': message})
                 else:
                     return jsonify({'success': False, 'error': 'Failed to complete login'})
@@ -397,6 +403,10 @@ class WebGUIServer:
                 if success:
                     # Broadcast update to all connected clients
                     self.broadcast_log_entry(f"Account @{username} removed")
+                    
+                    # Broadcast status update to refresh dashboard
+                    self.broadcast_status_update()
+                    
                     return jsonify({'success': True, 'message': f'Account {username} removed'})
                 else:
                     return jsonify({'success': False, 'error': 'Failed to remove account'})
@@ -602,9 +612,88 @@ class WebGUIServer:
                 with open('config.json', 'w') as f:
                     json.dump(self.config, f, indent=4)
                 
+                # Update scheduler if it exists
+                if self.post_manager and hasattr(self.post_manager, 'posting_scheduler'):
+                    scheduler = self.post_manager.posting_scheduler
+                    
+                    # Update randomness
+                    if 'posting_intervals' in data:
+                        rp = data['posting_intervals'].get('randomness_percent')
+                        if rp is not None:
+                            scheduler.randomness_percent = int(rp)
+                            scheduler.config['randomness_percent'] = int(rp)
+                            self.logger.info(f"Updated scheduler randomness to {rp}%")
+                            
+                        # Update all community groups with new default interval
+                        new_default = data['posting_intervals'].get('default')
+                        if new_default is not None:
+                            interval = int(new_default)
+                            # Directly update group interval property
+                            for group in scheduler.community_groups:
+                                group.posting_interval = interval
+                            # Save updated groups to file
+                            scheduler.file_manager.save_communities(scheduler.community_groups)
+                            # Reload to ensure consistency
+                            scheduler.reload_community_groups()
+                            self.logger.info(f"Updated {len(scheduler.community_groups)} community groups to new interval: {interval}s")
+
                 return jsonify({'success': True, 'message': 'Configuration saved'})
             except Exception as e:
                 self.logger.error(f"Error saving config: {e}")
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/config/concurrent-browsers', methods=['GET'])
+        def get_concurrent_browsers_config():
+            """Get concurrent browsers configuration."""
+            try:
+                # Get current setting from config
+                current_value = self.config.get('browser_settings', {}).get('max_concurrent_browsers', 1)
+                
+                return jsonify({
+                    'success': True,
+                    'max_concurrent_browsers': current_value,
+                    'min_value': 1,
+                    'max_value': 5,
+                    'description': 'Maximum number of browsers that can run simultaneously (1-5). Higher values increase speed but use more system resources.'
+                })
+            except Exception as e:
+                self.logger.error(f"Error getting concurrent browsers config: {e}")
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/config/concurrent-browsers', methods=['POST'])
+        def set_concurrent_browsers_config():
+            """Set concurrent browsers configuration."""
+            try:
+                data = request.get_json()
+                max_concurrent = data.get('max_concurrent_browsers', 1)
+                
+                # Validate the value
+                if not isinstance(max_concurrent, int) or not 1 <= max_concurrent <= 5:
+                    return jsonify({
+                        'success': False, 
+                        'error': 'max_concurrent_browsers must be an integer between 1 and 5'
+                    })
+                
+                # Update config
+                if 'browser_settings' not in self.config:
+                    self.config['browser_settings'] = {}
+                
+                self.config['browser_settings']['max_concurrent_browsers'] = max_concurrent
+                
+                # Save to file
+                with open('config.json', 'w') as f:
+                    json.dump(self.config, f, indent=4)
+                
+                # Broadcast update to all connected clients
+                self.broadcast_log_entry(f"Concurrent browsers setting updated to {max_concurrent}")
+                
+                return jsonify({
+                    'success': True, 
+                    'message': f'Concurrent browsers set to {max_concurrent}',
+                    'max_concurrent_browsers': max_concurrent
+                })
+            except Exception as e:
+                self.logger.error(f"Error setting concurrent browsers config: {e}")
                 return jsonify({'success': False, 'error': str(e)})
         
         @self.app.route('/api/files/<filename>', methods=['GET'])
@@ -715,6 +804,9 @@ class WebGUIServer:
                 # Broadcast update
                 self.broadcast_log_entry(f"Community '{name}' added")
                 
+                # Broadcast status update to refresh dashboard
+                self.broadcast_status_update()
+                
                 return jsonify({'success': True, 'message': 'Community added successfully'})
                 
             except Exception as e:
@@ -731,6 +823,9 @@ class WebGUIServer:
                 
                 # Broadcast update
                 self.broadcast_log_entry(f"Community removed")
+                
+                # Broadcast status update to refresh dashboard
+                self.broadcast_status_update()
                 
                 return jsonify({'success': True, 'message': 'Community removed successfully'})
                 
@@ -870,21 +965,65 @@ class WebGUIServer:
                 images_dir.mkdir(parents=True, exist_ok=True)
                 
                 image_paths = []
+                
+                # Image Deduplication Logic
+                import hashlib
+                hashes_file = data_dir / "image_hashes.json"
+                image_hashes = {}
+                
+                # Load existing hashes
+                if hashes_file.exists():
+                    try:
+                        image_hashes = json.loads(hashes_file.read_text(encoding='utf-8'))
+                    except: 
+                        pass
+                else:
+                    # Index existing images if hash file doesn't exist
+                    self.logger.info("Indexing existing images for deduplication...")
+                    for existing_file in images_dir.glob('*'):
+                        if existing_file.is_file() and existing_file.name != 'image_hashes.json':
+                            try:
+                                with open(existing_file, 'rb') as f:
+                                    h = hashlib.sha256(f.read()).hexdigest()
+                                    image_hashes[h] = existing_file.name
+                            except: 
+                                pass
+                
                 if 'images' in request.files:
                     files = request.files.getlist('images')
                     self.logger.info(f"Received {len(files)} images for upload")
                     
                     for file in files:
                         if file and file.filename:
-                            filename = secure_filename(file.filename)
-                            timestamp = int(datetime.now().timestamp())
-                            unique_filename = f"{timestamp}_{filename}"
-                            image_path = images_dir / unique_filename
+                            # Calculate hash
+                            content = file.read()
+                            file.seek(0)
+                            file_hash = hashlib.sha256(content).hexdigest()
                             
-                            self.logger.info(f"Saving image to {image_path}")
-                            file.save(str(image_path))
-                            # Store relative path for portability
-                            image_paths.append(str(Path("data/images") / unique_filename))
+                            # Check for duplicate
+                            existing_filename = image_hashes.get(file_hash)
+                            if existing_filename and (images_dir / existing_filename).exists():
+                                self.logger.info(f"Reusing existing image: {existing_filename}")
+                                image_paths.append(str(Path("data/images") / existing_filename))
+                            else:
+                                filename = secure_filename(file.filename)
+                                timestamp = int(datetime.now().timestamp())
+                                unique_filename = f"{timestamp}_{filename}"
+                                image_path = images_dir / unique_filename
+                                
+                                self.logger.info(f"Saving image to {image_path}")
+                                file.save(str(image_path))
+                                
+                                # Update hash index
+                                image_hashes[file_hash] = unique_filename
+                                # Store relative path for portability
+                                image_paths.append(str(Path("data/images") / unique_filename))
+                
+                # Save updated hashes
+                try:
+                    hashes_file.write_text(json.dumps(image_hashes, indent=2), encoding='utf-8')
+                except Exception as e:
+                    self.logger.error(f"Failed to save image hashes: {e}")
                 
                 if not image_paths:
                      self.logger.warning("No images processed in upload request")
@@ -900,17 +1039,35 @@ class WebGUIServer:
                 else:
                     groups = []
                 
-                new_group = {
-                    'id': int(time.time() * 1000),
-                    'images': image_paths,
-                    'created_at': datetime.now().isoformat()
-                }
-                groups.append(new_group)
+                if groups:
+                    # Use the first group as the main library for all images
+                    # This ensures all uploaded images are considered one large group
+                    group = groups[0]
+                    existing_images = set(group['images'])
+                    added_count = 0
+                    
+                    for p in image_paths:
+                        if p not in existing_images:
+                            group['images'].append(p)
+                            existing_images.add(p)
+                            added_count += 1
+                    
+                    self.logger.info(f"Added {added_count} images to main library group (Total: {len(group['images'])})")
+                else:
+                    # Create the first/main group
+                    new_group = {
+                        'id': int(time.time() * 1000),
+                        'images': image_paths,
+                        'name': 'Main Library',
+                        'created_at': datetime.now().isoformat()
+                    }
+                    groups.append(new_group)
+                    self.logger.info(f"Created main library group with {len(image_paths)} images")
                 
                 self.logger.info(f"Saving image group library with {len(groups)} items")
                 img_file.write_text(json.dumps(groups, indent=2), encoding='utf-8')
                 
-                return jsonify({'success': True, 'message': 'Image group added'})
+                return jsonify({'success': True, 'message': 'Images added to library'})
             except Exception as e:
                 self.logger.error(f"Error adding image group: {e}")
                 import traceback
@@ -947,32 +1104,64 @@ class WebGUIServer:
                     
                     posts = self.load_posts_data()
                     
-                    # Handle image uploads
+                    # Handle image uploads with deduplication
                     image_paths = []
-                    # Support both 'images' list and 'image_N' pattern
+                    images_dir = Path("data/images")
+                    images_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    import hashlib
+                    hashes_file = Path("data/image_hashes.json")
+                    image_hashes = {}
+                    
+                    # Load or Initialize Index
+                    if hashes_file.exists():
+                        try:
+                            image_hashes = json.loads(hashes_file.read_text(encoding='utf-8'))
+                        except: pass
+                    else:
+                        for existing in images_dir.glob('*'):
+                            if existing.is_file() and existing.name != 'image_hashes.json':
+                                try:
+                                    with open(existing, 'rb') as f:
+                                        h = hashlib.sha256(f.read()).hexdigest()
+                                        image_hashes[h] = existing.name
+                                except: pass
+
+                    files_to_process = []
                     if 'images' in request.files:
-                        files = request.files.getlist('images')
-                        for file in files:
-                            if file and file.filename:
-                                filename = secure_filename(file.filename)
-                                timestamp = int(datetime.now().timestamp())
-                                unique_filename = f"{timestamp}_{filename}"
-                                image_path = Path("data/images") / unique_filename
-                                file.save(str(image_path))
-                                image_paths.append(str(image_path))
+                        files_to_process.extend(request.files.getlist('images'))
                     
                     for key in request.files:
                         if key.startswith('image_'):
-                            file = request.files[key]
-                            if file and file.filename:
-                                # Secure the filename and save
+                            files_to_process.append(request.files[key])
+                            
+                    for file in files_to_process:
+                        if file and file.filename:
+                            # Hash check
+                            content = file.read()
+                            file.seek(0)
+                            fhash = hashlib.sha256(content).hexdigest()
+                            
+                            existing_name = image_hashes.get(fhash)
+                            if existing_name and (images_dir / existing_name).exists():
+                                self.logger.info(f"Reusing existing image: {existing_name}")
+                                image_path = images_dir / existing_name
+                            else:
                                 filename = secure_filename(file.filename)
                                 timestamp = int(datetime.now().timestamp())
                                 unique_filename = f"{timestamp}_{filename}"
-                                
-                                image_path = Path("data/images") / unique_filename
+                                image_path = images_dir / unique_filename
+                                self.logger.info(f"Saving new image: {image_path}")
                                 file.save(str(image_path))
-                                image_paths.append(str(image_path))
+                                image_hashes[fhash] = unique_filename
+                            
+                            # Store path string
+                            image_paths.append(str(image_path))
+                            
+                    # Save hashes
+                    try:
+                        hashes_file.write_text(json.dumps(image_hashes, indent=2), encoding='utf-8')
+                    except: pass
                     
                     # Add new post with images
                     new_post = {
@@ -1108,6 +1297,192 @@ class WebGUIServer:
                 error_msg = f'Post now failed: {str(e)}'
                 self.broadcast_log_entry(error_msg)
                 return jsonify({'success': False, 'error': error_msg})
+        
+        # Dashboard API endpoints
+        @self.app.route('/api/dashboard/account-activity', methods=['GET'])
+        def get_account_activity():
+            """Get account posting activity for dashboard."""
+            try:
+                # Reload accounts to get latest stats
+                self.account_manager.load_accounts()
+                
+                accounts_data = []
+                accounts = self.account_manager.get_all_accounts()
+                
+                for account in accounts:
+                    # Get posting history for this account
+                    # Prioritize real stats from account object
+                    history = self.get_account_posting_history(account.username)
+                    
+                    accounts_data.append({
+                        'username': account.username,
+                        'total_posts': account.posts_count,
+                        'posts_today': history.get('posts_today', 0),
+                        'success_rate': history.get('success_rate', 0),
+                        'communities_count': len(history.get('communities', [])),
+                        'last_post_time': account.last_used.isoformat() if account.last_used else None,
+                        'status': account.status
+                    })
+                
+                return jsonify({'accounts': accounts_data})
+                
+            except Exception as e:
+                self.logger.error(f"Error getting account activity: {e}")
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/dashboard/recent-posts', methods=['GET'])
+        def get_recent_posts():
+            """Get recent posts for dashboard."""
+            try:
+                recent_posts = self.get_recent_posting_history(limit=10)
+                
+                return jsonify({
+                    'posts': recent_posts,
+                    'total': len(recent_posts)
+                })
+                
+            except Exception as e:
+                self.logger.error(f"Error getting recent posts: {e}")
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/dashboard/next-posts', methods=['GET'])
+        def get_next_posts():
+            """Get next posts in pipeline for dashboard."""
+            try:
+                if not self.post_manager:
+                    return jsonify({'posts': [], 'total': 0})
+                
+                # Get next scheduled posts
+                next_posts = self.get_upcoming_posts(limit=5)
+                
+                return jsonify({
+                    'posts': next_posts,
+                    'total': len(next_posts)
+                })
+                
+            except Exception as e:
+                self.logger.error(f"Error getting next posts: {e}")
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/dashboard/community-status', methods=['GET'])
+        def get_community_status():
+            """Get community status for dashboard."""
+            try:
+                communities_data = []
+                
+                # Load communities directly from file
+                communities = self.load_communities_data()
+                
+                # Get current community from post manager if available
+                current_community = None
+                if self.post_manager:
+                    try:
+                        status = self.post_manager.get_community_status()
+                        current_community = status.get('current_community')
+                    except:
+                        pass  # Ignore errors if post_manager methods don't exist
+                
+                for community in communities:
+                    if community.get('active', True):
+                        # Get posting history for this community
+                        history = self.get_community_posting_history(community['url'])
+                        
+                        communities_data.append({
+                            'name': community['name'],
+                            'url': community['url'],
+                            'is_current': community['url'] == current_community,
+                            'total_posts': history.get('total_posts', 0),
+                            'last_post_time': history.get('last_post_time'),
+                            'next_post_time': history.get('next_post_time')
+                        })
+                
+                return jsonify({
+                    'communities': communities_data,
+                    'total': len(communities_data)
+                })
+                
+            except Exception as e:
+                self.logger.error(f"Error getting community status: {e}")
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/dashboard/multi-account-status', methods=['GET'])
+        def get_multi_account_status():
+            """Get multi-account posting status for dashboard."""
+            try:
+                # Get basic counts from data files
+                accounts = self.account_manager.get_all_accounts()
+                communities = self.load_communities_data()
+                active_communities = [c for c in communities if c.get('active', True)]
+                
+                total_accounts = len(accounts)
+                total_communities = len(active_communities)
+                total_combinations = total_accounts * total_communities
+                
+                # If no accounts or communities, return disabled state
+                if total_accounts == 0 or total_communities == 0:
+                    return jsonify({
+                        'enabled': False,
+                        'total_accounts': total_accounts,
+                        'total_communities': total_communities,
+                        'total_combinations': 0,
+                        'accounts': [],
+                        'communities': [],
+                        'current_account': None,
+                        'current_community': None,
+                        'strategy': 'Add accounts and communities to enable'
+                    })
+                
+                # Get current status from post manager if available
+                current_account = None
+                current_community = None
+                if self.post_manager:
+                    try:
+                        account_status = self.post_manager.get_account_status()
+                        community_status = self.post_manager.get_community_status()
+                        current_account = account_status.get('current_account')
+                        current_community = community_status.get('current_community_short')
+                    except:
+                        pass  # Ignore errors if post_manager methods don't exist
+                
+                # Get detailed account info
+                accounts_info = []
+                for i, account in enumerate(accounts):
+                    accounts_info.append({
+                        'username': account.username,
+                        'index': i,
+                        'is_current': account.username == current_account,
+                        'communities_to_post': total_communities,
+                        'status': account.status
+                    })
+                
+                # Get detailed community info
+                communities_info = []
+                for i, community in enumerate(active_communities):
+                    community_short = community['name']
+                    communities_info.append({
+                        'name': community_short,
+                        'url': community['url'],
+                        'index': i,
+                        'is_current': community['url'] == current_community,
+                        'accounts_to_post': total_accounts
+                    })
+                
+                return jsonify({
+                    'enabled': True,
+                    'total_accounts': total_accounts,
+                    'total_communities': total_communities,
+                    'total_combinations': total_combinations,
+                    'current_account': current_account or (accounts[0].username if accounts else None),
+                    'current_community': current_community or (active_communities[0]['name'] if active_communities else None),
+                    'accounts': accounts_info,
+                    'communities': communities_info,
+                    'strategy': 'Every account posts to every community'
+                })
+                
+            except Exception as e:
+                self.logger.error(f"Error getting multi-account status: {e}")
+                return jsonify({'success': False, 'error': str(e)})
+    
     
     async def _create_post_with_zendriver(self, account, content: str, image_paths: list, community_url: str = None) -> bool:
         """
@@ -1528,6 +1903,14 @@ class WebGUIServer:
         except Exception as e:
             self.logger.error(f"Error broadcasting log entry: {e}")
     
+    def broadcast_dashboard_refresh(self):
+        """Broadcast dashboard refresh event to all connected clients."""
+        try:
+            self.socketio.emit('dashboard_refresh')
+            self.logger.debug("Dashboard refresh event broadcasted")
+        except Exception as e:
+            self.logger.error(f"Error broadcasting dashboard refresh: {e}")
+    
     def load_communities_data(self) -> List[Dict]:
         """Load communities from JSON file."""
         try:
@@ -1576,11 +1959,174 @@ class WebGUIServer:
         except Exception as e:
             self.logger.error(f"Error saving posts: {e}")
     
+    def get_account_posting_history(self, username: str) -> Dict:
+        """Get posting history for a specific account."""
+        try:
+            # This would typically read from a posting history database/file
+            # For now, return mock data - you can implement actual history tracking
+            history_file = Path(f"data/history_{username}.json")
+            
+            if history_file.exists():
+                with open(history_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            
+            # Return default empty history
+            return {
+                'total_posts': 0,
+                'posts_today': 0,
+                'success_rate': 0,
+                'communities': [],
+                'last_post_time': None
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error getting account history for {username}: {e}")
+            return {
+                'total_posts': 0,
+                'posts_today': 0,
+                'success_rate': 0,
+                'communities': [],
+                'last_post_time': None
+            }
+    
+    def get_recent_posting_history(self, limit: int = 10) -> List[Dict]:
+        """Get recent posting history across all accounts."""
+        try:
+            # This would typically read from a posting history database/file
+            # For now, return mock data - you can implement actual history tracking
+            history_file = Path("data/posting_history.json")
+            
+            if history_file.exists():
+                with open(history_file, 'r', encoding='utf-8') as f:
+                    try:
+                        history = json.load(f)
+                        
+                        # Handle both List (real app) and Dict (old/mock) formats
+                        if isinstance(history, list):
+                            posts_list = history
+                        else:
+                            posts_list = history.get('posts', [])
+                        
+                        # Sort by timestamp/posted_at and return most recent
+                        recent = sorted(posts_list, 
+                                      key=lambda x: x.get('timestamp') or x.get('posted_at') or '', 
+                                      reverse=True)
+                        return recent[:limit]
+                    except json.JSONDecodeError:
+                        return []
+            
+            return []
+            
+        except Exception as e:
+            self.logger.error(f"Error getting recent posting history: {e}")
+            return []
+    
+    def get_upcoming_posts(self, limit: int = 5) -> List[Dict]:
+        """Get upcoming scheduled posts."""
+        try:
+            if not self.post_manager:
+                return []
+            
+            # Get next posts from the scheduler
+            upcoming = []
+            
+            # Generate mock upcoming posts based on current configuration
+            # In a real implementation, this would come from the scheduler
+            communities = self.load_communities_data()
+            active_communities = [c for c in communities if c.get('active', True)]
+            
+            if active_communities:
+                from datetime import datetime, timedelta
+                import random
+                
+                base_time = datetime.now()
+                
+                for i in range(min(limit, len(active_communities))):
+                    community = active_communities[i % len(active_communities)]
+                    scheduled_time = base_time + timedelta(minutes=30 + (i * 60))
+                    
+                    # Get a sample caption
+                    captions_file = Path("data/captions.json")
+                    content = "Sample post content"
+                    if captions_file.exists():
+                        captions = json.loads(captions_file.read_text())
+                        if captions:
+                            content = random.choice(captions)['content']
+                    
+                    upcoming.append({
+                        'content': content,
+                        'scheduled_for': scheduled_time.isoformat(),
+                        'account': 'sample_account',
+                        'community_url': community['url'],
+                        'community_name': community['name']
+                    })
+            
+            return upcoming
+            
+        except Exception as e:
+            self.logger.error(f"Error getting upcoming posts: {e}")
+            return []
+    
+    def get_community_posting_history(self, community_url: str) -> Dict:
+        """Get posting history for a specific community."""
+        try:
+            # This would typically read from a posting history database/file
+            # For now, return mock data - you can implement actual history tracking
+            history_file = Path("data/posting_history.json")
+            
+            if history_file.exists():
+                with open(history_file, 'r', encoding='utf-8') as f:
+                    try:
+                        history = json.load(f)
+                        
+                        # Handle both List (real app) and Dict (old/mock) formats
+                        if isinstance(history, list):
+                            posts_list = history
+                        else:
+                            posts_list = history.get('posts', [])
+                        
+                        # Filter posts for this community
+                        community_posts = [
+                            post for post in posts_list
+                            if post.get('community') == community_url or post.get('community_url') == community_url
+                        ]
+                        
+                        if community_posts:
+                            # Get last post time
+                            # Use 'timestamp' first, fall back to 'posted_at'
+                            last_post = max(community_posts, key=lambda x: x.get('timestamp') or x.get('posted_at') or '')
+                            
+                            return {
+                                'total_posts': len(community_posts),
+                                'last_post_time': last_post.get('timestamp') or last_post.get('posted_at'),
+                                'next_post_time': None  # Would be calculated based on schedule
+                            }
+                    except json.JSONDecodeError:
+                        pass
+            
+            return {
+                'total_posts': 0,
+                'last_post_time': None,
+                'next_post_time': None
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error getting community history for {community_url}: {e}")
+            return {
+                'total_posts': 0,
+                'last_post_time': None,
+                'next_post_time': None
+            }
+    
     def set_callbacks(self, start_callback=None, stop_callback=None, pause_callback=None):
         """Set callback functions for bot operations."""
         self.start_callback = start_callback
         self.stop_callback = stop_callback
         self.pause_callback = pause_callback
+    
+    def set_post_manager(self, post_manager):
+        """Set the post manager instance."""
+        self.post_manager = post_manager
     
     def run(self, host='127.0.0.1', port=5000, debug=False):
         """Start the web server."""

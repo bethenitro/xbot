@@ -1,0 +1,17 @@
+v) [nikant@arch Xbot]$ python main.py
+2026-02-04 18:12:05 - __main__ - INFO - Xbot starting up...
+2026-02-04 18:12:05 - __main__ - INFO - Configuration loaded from: config.json
+2026-02-04 18:12:05 - __main__ - INFO - Log level: INFO
+2026-02-04 18:12:06 - __main__ - INFO - Using ZenDriver browser
+2026-02-04 18:12:06 - src.account.account_manager - INFO - Loaded 1 accounts
+2026-02-04 18:12:06 - src.utils.file_manager - WARNING - Posts file not found: data/posts.txt
+2026-02-04 18:12:06 - src.posting.queue_manager - INFO - Loaded 0 posts from file
+2026-02-04 18:12:06 - src.utils.file_manager - INFO - Loaded 2 communities from communities.json
+2026-02-04 18:12:06 - src.posting.posting_scheduler - INFO - Loaded 1 community groups from file
+2026-02-04 18:12:06 - __main__ - INFO - Running in headless mode...
+2026-02-04 18:12:06 - src.core.post_manager - INFO - Starting posting operations...
+2026-02-04 18:12:06 - src.core.post_manager - INFO - Posting operations thread started
+2026-02-04 18:12:06 - src.core.post_manager - INFO - Posting loop started with dedicated event loop
+2026-02-04 18:12:06 - src.utils.file_manager - INFO - Loaded 2 communities from communities.json
+2026-02-04 18:12:06 - src.core.post_manager - INFO - ✅ Loaded 2 communities for cycling
+2026-02-04 18:12:06 - 

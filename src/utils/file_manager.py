@@ -30,9 +30,23 @@ class FileManager:
         
         self.posts_file = self.data_dir / "posts.txt"
         self.communities_file = self.data_dir / "communities.txt"
+        self.communities_json_file = self.data_dir / "communities.json"
+        self.captions_json_file = self.data_dir / "captions.json"
+        self.image_groups_json_file = self.data_dir / "image_groups.json"
         self.history_file = self.data_dir / "posting_history.json"
+        self.config_file = Path("config.json")
         
         self.logger = logging.getLogger(__name__)
+    
+    def _get_configured_interval(self) -> int:
+        """Get posting interval from config.json, fallback to 3600."""
+        try:
+            if self.config_file.exists():
+                config = json.loads(self.config_file.read_text(encoding='utf-8'))
+                return int(config.get('posting_intervals', {}).get('default', 3600))
+        except:
+            pass
+        return 3600
     
     def read_posts_file(self) -> List[Post]:
         """
@@ -126,11 +140,7 @@ class FileManager:
     
     def read_communities_file(self) -> List[CommunityGroup]:
         """
-        Read community groups from communities.txt file.
-        
-        Format: Each line is either:
-        - Plain community URL (added to 'default' group)
-        - JSON object with name, communities, posting_interval, etc.
+        Read community groups from communities.json file (GUI format) or fallback to communities.txt.
         
         Returns:
             List of CommunityGroup objects
@@ -140,15 +150,66 @@ class FileManager:
             FileNotFoundError: If communities file doesn't exist
         """
         try:
-            if not self.communities_file.exists():
-                self.logger.warning(f"Communities file not found: {self.communities_file}")
-                # Create default community group
+            # First try to read from communities.json (GUI format)
+            if self.communities_json_file.exists():
+                return self._read_communities_from_json()
+            
+            # Fallback to communities.txt (legacy format)
+            if self.communities_file.exists():
+                return self._read_communities_from_txt()
+            
+            # No communities file found, return empty default group
+            self.logger.warning("No communities file found, creating empty default group")
+            return [CommunityGroup(
+                name="default",
+                communities=[],
+                posting_interval=self._get_configured_interval()
+            )]
+            
+        except Exception as e:
+            self.logger.error(f"Failed to read communities file: {e}")
+            raise
+    
+    def _read_communities_from_json(self) -> List[CommunityGroup]:
+        """Read communities from communities.json file (GUI format)."""
+        try:
+            content = safe_file_read(str(self.communities_json_file))
+            if content is None:
+                raise FileNotFoundError(f"Could not read communities JSON file: {self.communities_json_file}")
+            
+            communities_data = json.loads(content)
+            
+            # Convert GUI format to CommunityGroup objects
+            # GUI format: [{"id": 1, "name": "community1", "url": "...", "active": true, "created_at": "..."}]
+            active_communities = [c for c in communities_data if c.get('active', True)]
+            
+            if not active_communities:
+                self.logger.warning("No active communities found in communities.json")
                 return [CommunityGroup(
                     name="default",
                     communities=[],
-                    posting_interval=3600
+                    posting_interval=self._get_configured_interval()
                 )]
             
+            # Create a single community group with all active communities
+            community_urls = [c['url'] for c in active_communities]
+            
+            community_group = CommunityGroup(
+                name="default",
+                communities=community_urls,
+                posting_interval=self._get_configured_interval()
+            )
+            
+            self.logger.info(f"Loaded {len(community_urls)} communities from communities.json")
+            return [community_group]
+            
+        except Exception as e:
+            self.logger.error(f"Failed to read communities from JSON: {e}")
+            raise
+    
+    def _read_communities_from_txt(self) -> List[CommunityGroup]:
+        """Read communities from communities.txt file (legacy format)."""
+        try:
             content = safe_file_read(str(self.communities_file))
             if content is None:
                 raise FileNotFoundError(f"Could not read communities file: {self.communities_file}")
@@ -178,7 +239,7 @@ class FileManager:
                 community_groups.insert(0, CommunityGroup(
                     name="default",
                     communities=default_communities,
-                    posting_interval=3600
+                    posting_interval=self._get_configured_interval()
                 ))
             
             # Ensure we have at least one community group
@@ -186,14 +247,14 @@ class FileManager:
                 community_groups.append(CommunityGroup(
                     name="default",
                     communities=[],
-                    posting_interval=3600
+                    posting_interval=self._get_configured_interval()
                 ))
             
             self.logger.info(f"Loaded {len(community_groups)} community groups from {self.communities_file}")
             return community_groups
             
         except Exception as e:
-            self.logger.error(f"Failed to read communities file: {e}")
+            self.logger.error(f"Failed to read communities from TXT: {e}")
             raise
     
     def _parse_community_line(self, line: str, line_num: int) -> Optional[CommunityGroup]:
@@ -214,7 +275,7 @@ class FileManager:
                 return CommunityGroup(
                     name=data['name'],
                     communities=data['communities'],
-                    posting_interval=data.get('posting_interval', 3600),
+                    posting_interval=data.get('posting_interval', self._get_configured_interval()),
                     last_posted=datetime.fromisoformat(data['last_posted']) if data.get('last_posted') else None,
                     active=data.get('active', True)
                 )
@@ -224,7 +285,7 @@ class FileManager:
                     return CommunityGroup(
                         name="default",
                         communities=[line],
-                        posting_interval=3600
+                        posting_interval=self._get_configured_interval()
                     )
                 else:
                     raise ValueError(f"Invalid community URL format: {line}")

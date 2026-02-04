@@ -22,7 +22,7 @@ from config.manager import ConfigurationManager
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Enhanced Twitter Bot (Xbot) - Automated Twitter/X community posting"
+        description="Xbot - Automated Twitter/X community posting"
     )
     
     parser.add_argument(
@@ -38,14 +38,15 @@ def parse_arguments():
     )
     
     parser.add_argument(
-        "--log-file",
-        help="Path to log file (default: logs/xbot.log)"
-    )
-    
-    parser.add_argument(
         "--headless",
         action="store_true",
-        help="Run browser in headless mode"
+        help="Run browser in headless mode (invisible window)"
+    )
+
+    parser.add_argument(
+        "--no-gui",
+        action="store_true",
+        help="Run without the Web GUI (CLI mode)"
     )
     
     parser.add_argument(
@@ -57,7 +58,7 @@ def parse_arguments():
     parser.add_argument(
         "--version",
         action="version",
-        version="Enhanced Twitter Bot (Xbot) v1.0.0"
+        version="Xbot v1.0.0"
     )
     
     return parser.parse_args()
@@ -111,16 +112,14 @@ def main():
             config.browser_settings.headless = True
         
         # Set up logging
-        log_file = args.log_file or "logs/xbot.log"
         setup_logging(
-            log_level=config.error_handling.log_level,
-            log_file=log_file
+            log_level=config.error_handling.log_level
         )
         
         import logging
         logger = logging.getLogger(__name__)
         
-        logger.info("Enhanced Twitter Bot (Xbot) starting up...")
+        logger.info("Xbot starting up...")
         logger.info(f"Configuration loaded from: {args.config}")
         logger.info(f"Log level: {config.error_handling.log_level}")
         
@@ -146,8 +145,8 @@ def main():
         # Initialize post manager
         post_manager = PostManager(config_manager)
         
-        # Initialize web GUI if not in headless mode
-        if not config.browser_settings.headless:
+        # Initialize web GUI unless --no-gui is specified
+        if not args.no_gui:
             logger.info("Starting web-based GUI interface...")
             
             # Create web GUI server
@@ -189,8 +188,8 @@ def main():
                     post_manager.stop_posting()
                 gui.close()
         else:
-            # Headless mode - run without GUI
-            logger.info("Running in headless mode...")
+            # CLI / No-GUI mode
+            logger.info("Running in CLI mode (no GUI)...")
             
             try:
                 # Start posting operations

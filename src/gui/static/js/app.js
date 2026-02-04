@@ -52,8 +52,17 @@ class XbotWebInterface {
         this.setupEventListeners();
         this.setupNavigation();
         this.setupWebSocket();
-        this.checkBrowserSelection();
         this.loadInitialData();
+        
+        // Initialize dashboard manager with a slight delay to ensure DOM is ready
+        setTimeout(() => {
+            if (window.DashboardManager) {
+                this.dashboardManager = new window.DashboardManager(this);
+                console.log('Dashboard manager initialized');
+            } else {
+                console.warn('DashboardManager not available');
+            }
+        }, 100);
     }
     
     setupWebSocket() {
@@ -71,8 +80,22 @@ class XbotWebInterface {
         });
         
         this.socket.on('status_update', (data) => {
+            console.log('Status update received:', data);
             this.updateBotStatus(data.status);
             this.updateStats(data.stats);
+            
+            // Refresh dashboard data when status changes
+            if (this.dashboardManager && this.currentSection === 'dashboard') {
+                this.dashboardManager.loadDashboardData();
+            }
+        });
+        
+        // Listen for dashboard refresh events
+        this.socket.on('dashboard_refresh', () => {
+            console.log('Dashboard refresh requested');
+            if (this.dashboardManager && this.currentSection === 'dashboard') {
+                this.dashboardManager.loadDashboardData();
+            }
         });
         
         this.socket.on('log_entry', (data) => {
@@ -142,8 +165,15 @@ class XbotWebInterface {
             
             // Settings
             document.getElementById('saveConfig')?.addEventListener('click', () => this.saveConfig());
+            document.getElementById('saveSchedulerSettings')?.addEventListener('click', () => this.saveConfig());
             document.getElementById('resetConfig')?.addEventListener('click', () => this.resetConfig());
-            document.getElementById('selectBrowserBtn')?.addEventListener('click', () => this.showBrowserSelectionModal());
+            
+            // Concurrent browsers input handler
+            document.getElementById('maxConcurrentBrowsers')?.addEventListener('input', (e) => {
+                const value = Math.max(1, Math.min(5, parseInt(e.target.value) || 1));
+                e.target.value = value; // Ensure value stays within bounds
+                this.updateConcurrentBrowsersDisplay(value);
+            });
             
             // Modal
             document.querySelector('.modal-close')?.addEventListener('click', () => this.hideModal());
@@ -194,6 +224,11 @@ class XbotWebInterface {
         }
         
         this.currentSection = sectionName;
+        
+        // Dispatch section change event for other components
+        document.dispatchEvent(new CustomEvent('sectionChanged', {
+            detail: { section: sectionName }
+        }));
         
         // Load section-specific data
         this.loadSectionData(sectionName);
@@ -343,14 +378,24 @@ class XbotWebInterface {
     }
     
     updateStats(stats) {
-        document.getElementById('accountCount').textContent = stats.accounts || 0;
-        document.getElementById('proxyCount').textContent = stats.proxies || 0;
-        document.getElementById('queueCount').textContent = stats.queue || 0;
-        document.getElementById('successRate').textContent = stats.success_rate || '0%';
+        const updateElement = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        };
+
+        updateElement('accountCount', stats.accounts || 0);
+        updateElement('proxyCount', stats.proxies || 0);
+        updateElement('queueCount', stats.queue || 0);
+        updateElement('successRate', stats.success_rate || '0%');
     }
     
     async loadDashboardData() {
         await this.refreshStatus();
+        
+        // Delegate to dashboard manager if it exists
+        if (this.dashboardManager && this.dashboardManager.loadDashboardData) {
+            await this.dashboardManager.loadDashboardData();
+        }
     }
     
     async loadAccounts() {
@@ -612,6 +657,11 @@ class XbotWebInterface {
                     this.loadAccounts();
                     const proxyText = selectedProxy && useProxy ? ` with proxy` : '';
                     this.addLogEntry(`Account @${username} added${proxyText}`);
+                    
+                    // Refresh dashboard data
+                    if (this.dashboardManager) {
+                        this.dashboardManager.loadDashboardData();
+                    }
                 }
             } else {
                 this.showToast('Failed to add account: ' + data.error, 'error');
@@ -1797,6 +1847,21 @@ class XbotWebInterface {
             
             if (data.success) {
                 this.renderConfig(data.config);
+                
+                // Also load concurrent browsers config from the dedicated endpoint
+                try {
+                    const concurrentResponse = await fetch('/api/config/concurrent-browsers');
+                    if (concurrentResponse.ok) {
+                        const concurrentData = await concurrentResponse.json();
+                        const concurrentBrowsers = concurrentData.max_concurrent_browsers || 1;
+                        document.getElementById('maxConcurrentBrowsers').value = concurrentBrowsers;
+                        this.updateConcurrentBrowsersDisplay(concurrentBrowsers);
+                    }
+                } catch (concurrentError) {
+                    console.warn('Failed to load concurrent browsers config:', concurrentError);
+                    // Use default value
+                    this.updateConcurrentBrowsersDisplay(1);
+                }
             } else {
                 this.showToast('Failed to load config: ' + data.error, 'error');
             }
@@ -1814,16 +1879,20 @@ class XbotWebInterface {
         document.getElementById('useProxiesDefault').checked = config.proxy_settings?.use_by_default !== false; // Default true
         
         // Scheduler settings
-        document.getElementById('postingInterval').value = config.posting_intervals?.default || 3600;
         document.getElementById('randomnessPercent').value = config.posting_intervals?.randomness_percent || 25;
         document.getElementById('refreshCookies').checked = config.stealth_settings?.auto_refresh_cookies !== false; // Default true
         document.getElementById('maxRetries').value = config.error_handling?.max_retries || 3;
+        
+        // Concurrent browsers setting
+        document.getElementById('maxConcurrentBrowsers').value = config.browser_settings?.max_concurrent_browsers || 1;
+        this.updateConcurrentBrowsersDisplay(config.browser_settings?.max_concurrent_browsers || 1);
     }
     
     async saveConfig() {
         const config = {
             browser_settings: {
-                headless: document.getElementById('headlessDefault').checked
+                headless: document.getElementById('headlessDefault').checked,
+                max_concurrent_browsers: parseInt(document.getElementById('maxConcurrentBrowsers').value) || 1
             },
             session_settings: {
                 auto_save: document.getElementById('autoSave').checked
@@ -1834,6 +1903,7 @@ class XbotWebInterface {
                 fingerprint_consistency: true // Always enabled for security
             },
             posting_intervals: {
+                // Use value from the main scheduler input on dashboard
                 default: parseInt(document.getElementById('postingInterval').value) || 3600,
                 randomness_percent: parseInt(document.getElementById('randomnessPercent').value) || 25
             },
@@ -1857,6 +1927,10 @@ class XbotWebInterface {
             if (data.success) {
                 this.showToast('Configuration saved successfully', 'success');
                 this.addLogEntry('Configuration updated');
+                
+                // Update concurrent browsers display after successful save
+                const concurrentBrowsers = parseInt(document.getElementById('maxConcurrentBrowsers').value) || 1;
+                this.updateConcurrentBrowsersDisplay(concurrentBrowsers);
             } else {
                 this.showToast('Failed to save config: ' + data.error, 'error');
             }
@@ -1876,29 +1950,55 @@ class XbotWebInterface {
         document.getElementById('autoSave').checked = true; // Default enabled
         document.getElementById('stealthMode').checked = true; // Default enabled
         document.getElementById('useProxiesDefault').checked = true; // Default enabled
-        document.getElementById('postingInterval').value = 3600;
         document.getElementById('randomnessPercent').value = 25;
         document.getElementById('refreshCookies').checked = true; // Default enabled
         document.getElementById('maxRetries').value = 3;
+        document.getElementById('maxConcurrentBrowsers').value = 1; // Default to 1 browser
+        
+        // Update concurrent browsers display
+        this.updateConcurrentBrowsersDisplay(1);
         
         this.showToast('Configuration reset to secure defaults', 'info');
     }
     
     clearLog() {
         const logContainer = document.getElementById('logContainer');
-        logContainer.innerHTML = '<div class="log-entry"><span class="log-time">' + 
-            new Date().toLocaleTimeString() + '</span><span class="log-message">Log cleared</span></div>';
+        if (!logContainer) {
+            console.log('Log cleared (no log container found)');
+            this.showToast('Log cleared', 'info');
+            return;
+        }
+        
+        logContainer.innerHTML = `
+            <div class="log-entry">
+                <span class="log-time">${new Date().toLocaleTimeString()}</span>
+                <span class="log-message">Log cleared</span>
+            </div>
+        `;
         this.showToast('Log cleared', 'info');
     }
     
     async refreshData() {
         this.showToast('Refreshing data...', 'info');
         await this.loadInitialData();
+        
+        // Also refresh dashboard data if dashboard manager exists
+        if (this.dashboardManager && this.dashboardManager.loadDashboardData) {
+            await this.dashboardManager.loadDashboardData();
+        }
+        
         this.showToast('Data refreshed successfully', 'success');
     }
     
     addLogEntry(message, level = 'info') {
         const logContainer = document.getElementById('logContainer');
+        
+        // If no log container exists, just log to console
+        if (!logContainer) {
+            console.log(`[${level.toUpperCase()}] ${message}`);
+            return;
+        }
+        
         const entry = document.createElement('div');
         entry.className = `log-entry log-${level}`;
         entry.innerHTML = `
@@ -1964,205 +2064,6 @@ class XbotWebInterface {
         });
     }
     
-    // Browser Selection Methods
-    async checkBrowserSelection() {
-        try {
-            const response = await fetch('/api/browser/status');
-            const data = await response.json();
-            
-            if (data.selected) {
-                // Update UI to show selected browser
-                this.updateBrowserUI(data.selected_browser, data.available_browsers);
-            } else {
-                // Update UI to show no browser selected
-                this.updateBrowserUI(null, data.available_browsers);
-                
-                // Only show browser selection modal if user hasn't dismissed it
-                if (!sessionStorage.getItem('browserSelectionDismissed')) {
-                    // Delay showing the modal to allow navigation to work first
-                    setTimeout(() => {
-                        this.showBrowserSelectionModal();
-                    }, 1000);
-                }
-            }
-        } catch (error) {
-            console.error('Failed to check browser selection:', error);
-            // Update UI to show no browser selected
-            this.updateBrowserUI(null, null);
-        }
-    }
-    
-    async showBrowserSelectionModal() {
-        try {
-            // Get available browsers
-            const response = await fetch('/api/browser/available');
-            const data = await response.json();
-            
-            if (data.success) {
-                this.renderBrowserSelectionModal(data.browsers);
-            } else {
-                this.showToast('Failed to load browser options', 'error');
-            }
-        } catch (error) {
-            console.error('Failed to load browser options:', error);
-            this.showToast('Failed to load browser options', 'error');
-        }
-    }
-    
-    renderBrowserSelectionModal(browsers) {
-        const modal = document.getElementById('browserSelectionModal');
-        
-        // Update status for each browser
-        Object.keys(browsers).forEach(browserKey => {
-            const browser = browsers[browserKey];
-            const statusElement = document.getElementById(`${browserKey}Status`);
-            
-            if (statusElement) {
-                if (browser.available) {
-                    statusElement.innerHTML = '<span class="status-indicator available">✓ Available</span>';
-                } else {
-                    statusElement.innerHTML = `
-                        <span class="status-indicator unavailable">✗ Not installed</span>
-                        <div class="install-command">${browser.install_command}</div>
-                    `;
-                }
-            }
-        });
-        
-        // Set up event listeners
-        document.querySelectorAll('.browser-option').forEach(option => {
-            option.addEventListener('click', () => {
-                const browserType = option.dataset.browser;
-                const browser = browsers[browserType];
-                
-                if (browser.available) {
-                    // Remove previous selection
-                    document.querySelectorAll('.browser-option').forEach(opt => {
-                        opt.classList.remove('selected');
-                    });
-                    
-                    // Select this option
-                    option.classList.add('selected');
-                    
-                    // Enable confirm button
-                    document.getElementById('confirmBrowserSelection').disabled = false;
-                    document.getElementById('confirmBrowserSelection').onclick = () => {
-                        this.selectBrowser(browserType);
-                    };
-                } else {
-                    this.showToast(`${browser.name} is not installed. Please install it first.`, 'warning');
-                }
-            });
-        });
-        
-        // Add dismiss button functionality
-        const dismissBtn = document.createElement('button');
-        dismissBtn.className = 'btn btn-outline';
-        dismissBtn.innerHTML = '<i class="fas fa-times"></i> Skip for Now';
-        dismissBtn.onclick = () => {
-            sessionStorage.setItem('browserSelectionDismissed', 'true');
-            modal.classList.remove('show');
-            this.showToast('Browser selection skipped. You can select a browser in Settings.', 'info');
-        };
-        
-        // Add dismiss button to modal footer
-        const modalFooter = modal.querySelector('.modal-footer');
-        if (!modalFooter.querySelector('.btn-outline')) {
-            modalFooter.insertBefore(dismissBtn, modalFooter.firstChild);
-        }
-        
-        // Show modal
-        modal.classList.add('show');
-    }
-    
-    async selectBrowser(browserType) {
-        try {
-            const response = await fetch('/api/browser/select', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ browser_type: browserType })
-            });
-            
-            const data = await response.json();
-            
-            if (data.success) {
-                this.showToast(`${browserType} selected successfully`, 'success');
-                
-                // Hide browser selection modal
-                document.getElementById('browserSelectionModal').classList.remove('show');
-                
-                // Update UI
-                this.updateBrowserUI(browserType, data.available_browsers);
-                
-                this.addLogEntry(`Browser engine selected: ${browserType}`);
-            } else {
-                this.showToast('Failed to select browser: ' + data.error, 'error');
-            }
-        } catch (error) {
-            console.error('Failed to select browser:', error);
-            this.showToast('Failed to select browser', 'error');
-        }
-    }
-    
-    updateBrowserUI(selectedBrowser, availableBrowsers) {
-        // Update settings section
-        const browserTypeSelect = document.getElementById('browserType');
-        const browserStatus = document.getElementById('browserStatus');
-        const browserName = document.getElementById('selectedBrowserName');
-        const browserDesc = document.getElementById('selectedBrowserDesc');
-        const browserFeatures = document.getElementById('selectedBrowserFeatures');
-        const selectBrowserBtn = document.getElementById('selectBrowserBtn');
-        
-        if (selectedBrowser) {
-            if (browserTypeSelect) {
-                browserTypeSelect.value = selectedBrowser;
-                browserTypeSelect.disabled = true;
-            }
-            
-            if (browserStatus) {
-                browserStatus.textContent = `${selectedBrowser} is selected and locked for this session`;
-            }
-            
-            if (selectBrowserBtn) {
-                selectBrowserBtn.disabled = true;
-                selectBrowserBtn.innerHTML = '<i class="fas fa-check"></i> Browser Selected';
-            }
-            
-            if (availableBrowsers && availableBrowsers[selectedBrowser]) {
-                const browser = availableBrowsers[selectedBrowser];
-                
-                if (browserName) browserName.textContent = browser.name;
-                if (browserDesc) browserDesc.textContent = browser.description;
-                
-                if (browserFeatures && browser.features) {
-                    browserFeatures.innerHTML = browser.features.map(feature => 
-                        `<li>${feature}</li>`
-                    ).join('');
-                }
-            }
-        } else {
-            // No browser selected
-            if (browserStatus) {
-                browserStatus.textContent = 'No browser selected - click "Select Browser Engine" to choose';
-            }
-            
-            if (selectBrowserBtn) {
-                selectBrowserBtn.disabled = false;
-                selectBrowserBtn.innerHTML = '<i class="fas fa-browser"></i> Select Browser Engine';
-            }
-            
-            if (browserName) browserName.textContent = 'No Browser Selected';
-            if (browserDesc) browserDesc.textContent = 'Please select a browser engine to continue';
-            
-            if (browserFeatures) {
-                browserFeatures.innerHTML = `
-                    <li>Browser selection required for account management</li>
-                    <li>Each browser offers different stealth capabilities</li>
-                `;
-            }
-        }
-    }
-    
     // Image handling methods
     handleImageUpload(event) {
         const files = Array.from(event.target.files);
@@ -2224,6 +2125,37 @@ class XbotWebInterface {
     removeImage(index) {
         this.quickPostFiles.splice(index, 1);
         this.updateImagePreview();
+    }
+    
+    // Concurrent browsers display update method
+    updateConcurrentBrowsersDisplay(value) {
+        // Update current setting display
+        const currentElement = document.getElementById('currentConcurrentBrowsers');
+        if (currentElement) {
+            currentElement.textContent = `${value}`;
+        }
+        
+        // Update recommendation based on value
+        const recommendationElement = document.getElementById('concurrentBrowsersRecommendation');
+        if (recommendationElement) {
+            let recommendation = '';
+            
+            if (value === 1) {
+                recommendation = 'Conservative mode - lowest resource usage, most stable';
+            } else if (value <= 3) {
+                recommendation = `Balanced mode - ${value}x faster posting, moderate resource usage`;
+            } else {
+                recommendation = `Aggressive mode - ${value}x faster posting, high resource usage`;
+            }
+            
+            recommendationElement.textContent = recommendation;
+        }
+        
+        // Update dashboard manager if it exists
+        if (this.dashboardManager && this.dashboardManager.updateConcurrentBrowsersDisplay) {
+            this.dashboardManager.currentConcurrentBrowsers = value;
+            this.dashboardManager.updateConcurrentBrowsersDisplay();
+        }
     }
 }
 

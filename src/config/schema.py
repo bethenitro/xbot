@@ -11,8 +11,8 @@ import json
 class PostingIntervals:
     """Configuration for posting intervals."""
     default: int = 3600  # 1 hour default
-    min: int = 1800      # 30 minutes minimum
-    max: int = 7200      # 2 hours maximum
+    min: int = 1         # 1 second minimum (no practical limit)
+    max: int = 86400     # 24 hours maximum
     randomness_percent: int = 25  # Randomness percentage for intervals
 
 
@@ -51,6 +51,7 @@ class BrowserSettings:
     window_height: int = 1080           # Browser window height
     user_data_dir: Optional[str] = None # Custom user data directory
     timeout: int = 30                   # Default timeout for operations in seconds
+    max_concurrent_browsers: int = 1     # Maximum number of concurrent browsers (1-5)
 
 
 @dataclass
@@ -141,7 +142,8 @@ class ConfigSchema:
                 'window_width': self.browser_settings.window_width,
                 'window_height': self.browser_settings.window_height,
                 'user_data_dir': self.browser_settings.user_data_dir,
-                'timeout': self.browser_settings.timeout
+                'timeout': self.browser_settings.timeout,
+                'max_concurrent_browsers': self.browser_settings.max_concurrent_browsers
             },
             'session_settings': {
                 'session_timeout': self.session_settings.session_timeout,
@@ -205,6 +207,8 @@ class ConfigSchema:
             raise ValueError("Browser window dimensions must be positive")
         if self.browser_settings.timeout <= 0:
             raise ValueError("Browser timeout must be positive")
+        if not 1 <= self.browser_settings.max_concurrent_browsers <= 5:
+            raise ValueError("Maximum concurrent browsers must be between 1 and 5")
         
         # Validate session settings
         if self.session_settings.session_timeout <= 0:

@@ -3,17 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Enhanced Twitter Bot (Xbot) - Web Interface</title>
+    <title>Xbot</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/interval-selector.js') }}"></script>
 </head>
 <body>
     <div class="app-container">
         <!-- Sidebar -->
         <nav class="sidebar">
             <div class="sidebar-header">
-                <h2>🤖 Xbot</h2>
+                <h2>Xbot</h2>
             </div>
             
             <ul class="nav-menu">
@@ -83,45 +85,61 @@
                             <p>Active Proxies</p>
                         </div>
                     </div>
-                    
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <i class="fas fa-list"></i>
-                        </div>
-                        <div class="stat-content">
-                            <h3 id="queueCount">0</h3>
-                            <p>Pending Posts</p>
-                        </div>
-                    </div>
-                    
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <i class="fas fa-check-circle"></i>
-                        </div>
-                        <div class="stat-content">
-                            <h3 id="successRate">0%</h3>
-                            <p>Success Rate</p>
+                </div>
+                
+                <div class="info-banner">
+                    <div class="info-banner-content">
+                        <i class="fas fa-info-circle"></i>
+                        <div class="info-text">
+                            <strong>Important Setup Instructions:</strong>
+                            <ul>
+                                <li>Keep the default setting of X account to be English</li>
+                                <li>If possible, join the communities that you want to post in prior to using the bot</li>
+                            </ul>
                         </div>
                     </div>
                 </div>
                 
-                <div class="activity-log">
+                <div class="dashboard-grid">
+                    <!-- Activity Log Section -->
                     <div class="card">
                         <div class="card-header">
-                            <h3>Activity Log</h3>
+                            <h3><i class="fas fa-list"></i> Activity Log</h3>
                             <button id="clearLog" class="btn btn-outline-sm">
                                 <i class="fas fa-trash"></i> Clear
                             </button>
                         </div>
                         <div class="card-body">
-                            <div id="logContainer" class="log-container">
-                                <div class="log-entry">
-                                    <span class="log-time">00:00:00</span>
-                                    <span class="log-message">Bot initialized successfully</span>
+                            <div id="logContainer" class="log-container" style="max-height: 300px; overflow-y: auto;">
+                                <div class="empty-state">
+                                    <i class="fas fa-file-alt"></i>
+                                    <p>No activity logged yet</p>
+                                    <small>Bot activities will appear here</small>
                                 </div>
                             </div>
                         </div>
                     </div>
+                    
+                    <!-- Account Activity Section -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-user-check"></i> Account Activity</h3>
+                            <button id="refreshActivity" class="btn btn-outline-sm">
+                                <i class="fas fa-sync-alt"></i> Refresh
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div id="accountActivity" class="account-activity">
+                                <div class="empty-state">
+                                    <i class="fas fa-chart-line"></i>
+                                    <p>No posting activity yet</p>
+                                    <small>Start the bot to see account activity</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+
                 </div>
             </section>
             
@@ -350,9 +368,34 @@
                                 <small class="help-text">Restart from community 1 when finished</small>
                             </div>
                             <div class="form-group">
-                                <label for="postingInterval">Base Posting Interval (seconds)</label>
-                                <input type="number" id="postingInterval" class="form-control" value="3600" min="300" max="86400">
-                                <small class="help-text">Base time between posts (300-86400 seconds)</small>
+                                <label for="postingInterval">Posting Interval</label>
+                                <div class="interval-selector">
+                                    <div class="interval-inputs">
+                                        <div class="interval-input-group">
+                                            <input type="number" id="intervalDays" class="form-control interval-input" value="0" min="0" max="365">
+                                            <label>Days</label>
+                                        </div>
+                                        <div class="interval-input-group">
+                                            <input type="number" id="intervalHours" class="form-control interval-input" value="1" min="0" max="23">
+                                            <label>Hours</label>
+                                        </div>
+                                        <div class="interval-input-group">
+                                            <input type="number" id="intervalMinutes" class="form-control interval-input" value="0" min="0" max="59">
+                                            <label>Minutes</label>
+                                        </div>
+                                        <div class="interval-input-group">
+                                            <input type="number" id="intervalSeconds" class="form-control interval-input" value="0" min="0" max="59">
+                                            <label>Seconds</label>
+                                        </div>
+                                    </div>
+                                    <div class="interval-display">
+                                        <span>Total: </span>
+                                        <span id="totalIntervalDisplay" class="total-interval">1 hour</span>
+                                        <span class="total-seconds">(<span id="totalSeconds">3600</span> seconds)</span>
+                                    </div>
+                                    <input type="hidden" id="postingInterval" value="3600">
+                                </div>
+                                <small class="help-text">Set the base time between posts (no minimum limit)</small>
                             </div>
                         </div>
                         <div class="form-row">
@@ -368,6 +411,11 @@
                                 </label>
                                 <small class="help-text">Update cookies after each successful post</small>
                             </div>
+                        </div>
+                        <div class="form-row">
+                            <button id="saveSchedulerSettings" class="btn btn-primary" style="width: 100%;">
+                                <i class="fas fa-save"></i> Save Scheduler Settings
+                            </button>
                         </div>
                         <p class="help-text">
                             🔄 <strong>Community Cycling:</strong> Automatically restart from community 1 after finishing the last community<br>
@@ -385,43 +433,7 @@
                     <h1>Settings</h1>
                 </div>
                 
-                <div class="card">
-                    <div class="card-header">
-                        <h3>Browser Configuration</h3>
-                    </div>
-                    <div class="card-body">
-                        <div class="browser-selection">
-                            <div class="form-group">
-                                <label for="browserType">Browser Engine</label>
-                                <select id="browserType" class="form-control" disabled>
-                                    <option value="camoufox">Camoufox (Firefox-based)</option>
-                                    <option value="patchright">Patchright (Chromium-based)</option>
-                                    <option value="zendriver">ZenDriver (Chrome CDP)</option>
-                                </select>
-                                <small class="help-text">
-                                    <span id="browserStatus">Browser selection will be available on next startup</span>
-                                </small>
-                            </div>
-                            <div class="form-group">
-                                <button type="button" id="selectBrowserBtn" class="btn btn-primary">
-                                    <i class="fas fa-browser"></i> Select Browser Engine
-                                </button>
-                                <small class="help-text">Choose between Camoufox (Firefox), Patchright (Chrome), or ZenDriver (CDP) for this session</small>
-                            </div>
-                            <div id="browserInfo" class="browser-info">
-                                <div class="browser-details">
-                                    <h4 id="selectedBrowserName">No Browser Selected</h4>
-                                    <p id="selectedBrowserDesc">Please select a browser engine to continue</p>
-                                    <ul id="selectedBrowserFeatures">
-                                        <li>Browser selection required for account management</li>
-                                        <li>Each browser offers different stealth capabilities</li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
+
                 <div class="card">
                     <div class="card-header">
                         <h3>Bot Configuration</h3>
@@ -462,16 +474,28 @@
                             </div>
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label for="postingInterval">Posting Interval (seconds)</label>
-                                    <input type="number" id="postingInterval" class="form-control" 
-                                           value="3600" min="60" max="86400">
-                                    <small class="help-text">Time between posts (60-86400 seconds)</small>
-                                </div>
-                                <div class="form-group">
                                     <label for="maxRetries">Max Retries</label>
                                     <input type="number" id="maxRetries" class="form-control" 
                                            value="3" min="1" max="10">
                                     <small class="help-text">Maximum retry attempts for failed operations</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="maxConcurrentBrowsers">Concurrent Browsers</label>
+                                    <input type="number" id="maxConcurrentBrowsers" class="form-control" 
+                                           value="1" min="1" max="5">
+                                    <small class="help-text">Maximum browsers running simultaneously (1-5). Higher values = faster posting but more system resources.</small>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <div class="concurrent-browsers-info">
+                                        <div class="info-item">
+                                            <strong>Current Setting:</strong> <span id="currentConcurrentBrowsers">1</span> browser(s)
+                                        </div>
+                                        <div class="info-item">
+                                            <strong>Recommendation:</strong> <span id="concurrentBrowsersRecommendation">Start with 1, increase if system can handle it</span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             <div class="form-group">
@@ -531,75 +555,6 @@
     <!-- Toast Notifications -->
     <div id="toast-container" class="toast-container"></div>
     
-    <!-- Browser Selection Modal -->
-    <div id="browserSelectionModal" class="modal browser-selection-modal">
-        <div class="modal-overlay"></div>
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Select Browser Engine</h3>
-                <p>Choose the browser engine for this session. This cannot be changed once selected.</p>
-            </div>
-            <div class="modal-body">
-                <div class="browser-options">
-                    <div class="browser-option" data-browser="camoufox">
-                        <div class="browser-icon">🦊</div>
-                        <div class="browser-info">
-                            <h4>Camoufox</h4>
-                            <p>Firefox-based browser with advanced anti-detection</p>
-                            <ul class="feature-list">
-                                <li>Advanced fingerprint spoofing</li>
-                                <li>Built-in stealth capabilities</li>
-                                <li>BrowserForge integration</li>
-                                <li>Automatic humanization</li>
-                            </ul>
-                            <div class="browser-status" id="camoufoxStatus">
-                                <span class="status-indicator checking">Checking availability...</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="browser-option" data-browser="patchright">
-                        <div class="browser-icon">🚀</div>
-                        <div class="browser-info">
-                            <h4>Patchright</h4>
-                            <p>Patched Playwright with enhanced stealth features</p>
-                            <ul class="feature-list">
-                                <li>Chromium-based stealth</li>
-                                <li>Advanced anti-detection patches</li>
-                                <li>High compatibility</li>
-                                <li>Fast performance</li>
-                            </ul>
-                            <div class="browser-status" id="patchrightStatus">
-                                <span class="status-indicator checking">Checking availability...</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="browser-option" data-browser="zendriver">
-                        <div class="browser-icon">⚡</div>
-                        <div class="browser-info">
-                            <h4>ZenDriver</h4>
-                            <p>Chrome DevTools Protocol-based automation (no WebDriver)</p>
-                            <ul class="feature-list">
-                                <li>Maximum stealth (no WebDriver)</li>
-                                <li>Chrome DevTools Protocol</li>
-                                <li>Blazing fast performance</li>
-                                <li>Undetectable by anti-bot systems</li>
-                            </ul>
-                            <div class="browser-status" id="zendriverStatus">
-                                <span class="status-indicator checking">Checking availability...</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button id="confirmBrowserSelection" class="btn btn-primary" disabled>
-                    <i class="fas fa-check"></i> Confirm Selection
-                </button>
-            </div>
-        </div>
-    </div>
     
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>

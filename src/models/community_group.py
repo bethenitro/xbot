@@ -31,8 +31,9 @@ class CommunityGroup:
             raise ValueError("Community group name cannot be empty")
         if not self.communities:
             raise ValueError("Community group must have at least one community URL")
-        if self.posting_interval < 1800:  # Minimum 30 minutes
-            raise ValueError("Posting interval must be at least 1800 seconds (30 minutes)")
+        # Removing minimum interval restriction to allow faster testing
+        # if self.posting_interval < 1800:  # Minimum 30 minutes
+        #    raise ValueError("Posting interval must be at least 1800 seconds (30 minutes)")
         
         # Validate community URLs
         for url in self.communities:

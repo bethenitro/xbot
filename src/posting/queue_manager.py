@@ -114,9 +114,13 @@ class QueueManager:
             caption_obj = random.choice(captions_data)
             content = caption_obj['content']
             
-            # Pick random image group (100% pairing)
+            # Pick random image group and select only ONE image from it
             group = random.choice(groups)
-            images = group['images']
+            all_images = group['images']
+            
+            # Select only one random image from the group
+            selected_image = random.choice(all_images)
+            images = [selected_image]  # Single image in list
             
             # Create a Post object
             post_id = f"dynamic_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:6]}"
@@ -128,7 +132,7 @@ class QueueManager:
                 status=PostStatus.PENDING,
                 created_at=datetime.now()
             )
-            self.logger.info(f"Generated dynamic post {post_id} with {len(images)} images")
+            self.logger.info(f"Generated dynamic post {post_id} with 1 image: {selected_image}")
             return post
             
         except Exception as e:

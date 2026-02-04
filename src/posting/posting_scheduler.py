@@ -54,11 +54,11 @@ class PostingScheduler:
             # Generate random offset within ±variation
             offset = random.randint(-variation, variation)
             
-            # Apply offset and ensure minimum interval
+            # Apply offset (no minimum limit as requested)
             randomized_interval = base_interval + offset
             
-            # Ensure minimum 5 minutes (300 seconds)
-            randomized_interval = max(300, randomized_interval)
+            # Ensure interval is positive
+            randomized_interval = max(1, randomized_interval)
             
             self.logger.debug(f"Randomized interval: {base_interval}s → {randomized_interval}s (±{self.randomness_percent}%)")
             
@@ -176,9 +176,9 @@ class PostingScheduler:
         """
         try:
             # Validate interval
-            if interval < 1800:  # Minimum 30 minutes
-                self.logger.error(f"Posting interval too short: {interval}s (minimum 1800s)")
-                return False
+            # if interval < 1800:  # Minimum 30 minutes
+            #    self.logger.error(f"Posting interval too short: {interval}s (minimum 1800s)")
+            #    return False
             
             # Find and update the community group
             group = self._find_community_group(community_group)

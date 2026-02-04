@@ -257,10 +257,12 @@ class StealthEngine:
             
             self.logger.debug(f"Applying stealth delay: {final_delay:.2f}s (risk: {risk_level:.2f})")
             await asyncio.sleep(final_delay)
+            return final_delay
             
         except Exception as e:
             self.logger.error(f"Failed to apply stealth delay: {e}")
             await asyncio.sleep(base_delay)  # Fallback to base delay
+            return base_delay
     
     def log_action(self, action_type: str, success: bool, details: Dict[str, Any] = None) -> None:
         """

@@ -20,18 +20,13 @@ def setup_logging(
     
     Args:
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
-        log_file: Path to log file (optional)
-        max_bytes: Maximum size of log file before rotation
-        backup_count: Number of backup log files to keep
+        log_file: Path to log file (ignored - file logging disabled)
+        max_bytes: Maximum size of log file before rotation (ignored)
+        backup_count: Number of backup log files to keep (ignored)
         
     Returns:
         Configured logger instance
     """
-    # Create logs directory if it doesn't exist
-    if log_file:
-        log_path = Path(log_file)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-    
     # Configure root logger
     logger = logging.getLogger()
     logger.setLevel(getattr(logging, log_level.upper()))
@@ -45,23 +40,11 @@ def setup_logging(
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     
-    # Console handler
+    # Console handler only (file logging disabled)
     console_handler = logging.StreamHandler()
     console_handler.setLevel(getattr(logging, log_level.upper()))
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
-    
-    # File handler with rotation (if log_file specified)
-    if log_file:
-        file_handler = logging.handlers.RotatingFileHandler(
-            log_file,
-            maxBytes=max_bytes,
-            backupCount=backup_count,
-            encoding='utf-8'
-        )
-        file_handler.setLevel(getattr(logging, log_level.upper()))
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
     
     return logger
 
