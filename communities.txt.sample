@@ -1,0 +1,12 @@
+# Twitter/X Communities for Xbot
+# Add one community URL per line
+# Lines starting with # are comments and will be ignored
+# Empty lines are also ignored
+
+# Example communities (replace with your actual community URLs):
+https://twitter.com/i/communities/1234567890123456789
+https://twitter.com/i/communities/9876543210987654321
+https://twitter.com/i/communities/1111222233334444555
+
+# Add more communities below:
+# https://twitter.com/i/communities/YOUR_COMMUNITY_ID_HERE

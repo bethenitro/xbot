@@ -1,0 +1,61 @@
+{
+  "posting_intervals": {
+    "default": 3600,
+    "min": 1800,
+    "max": 7200,
+    "randomness_percent": 25
+  },
+  "behavior_settings": {
+    "typing_delay_min": 50,
+    "typing_delay_max": 200,
+    "scroll_pause_min": 1000,
+    "scroll_pause_max": 3000,
+    "reading_pause_min": 5,
+    "reading_pause_max": 15,
+    "timing_fluctuation": 0.2
+  },
+  "stealth_settings": {
+    "enabled": true,
+    "random_visits": true,
+    "random_visits_count_min": 2,
+    "random_visits_count_max": 3,
+    "fingerprint_consistency": true,
+    "humanize_cursor": true,
+    "max_cursor_time": 1.5,
+    "show_cursor": false,
+    "auto_refresh_cookies": true
+  },
+  "browser_settings": {
+    "browser_type": "zendriver",
+    "headless": false,
+    "window_width": 1920,
+    "window_height": 1080,
+    "user_data_dir": null,
+    "timeout": 30
+  },
+  "session_settings": {
+    "session_timeout": 3600,
+    "auto_save": true,
+    "auto_save_cookies": true,
+    "max_session_age": 86400
+  },
+  "error_handling": {
+    "max_retries": 3,
+    "retry_delay_base": 1,
+    "rate_limit_pause": 900,
+    "skip_failed_posts": true,
+    "log_level": "INFO"
+  },
+  "automation": {
+    "selectors": {
+      "compose_button": "[data-testid='SideNav_NewTweet_Button']",
+      "compose_textbox": "[data-testid='tweetTextarea_0']",
+      "tweet_button": "[data-testid='tweetButton']",
+      "media_upload": "input[data-testid='fileInput']",
+      "media_button": "[data-testid='fileInput']",
+      "join_button": "//button[normalize-space(.)='Join']",
+      "joined_button": "//button[.//span[text()='Joined']]",
+      "agree_join_button": "//button[.//span[normalize-space(text())='Agree and join']]"
+    }
+  }
+}

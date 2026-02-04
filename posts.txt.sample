@@ -1,0 +1,21 @@
+# Sample posts file for Enhanced Twitter Bot (Xbot)
+# 
+# Format options:
+# 1. Plain text (one post per line)
+# 2. JSON format for advanced options
+#
+# Plain text examples:
+Hello world! This is my first automated post.
+Check out this amazing content I'm sharing today!
+
+# JSON format examples (one JSON object per line):
+{"content": "This post has an image attached!", "images": ["data/pictures/image.png"], "community_groups": ["default"]}
+{"content": "This post goes to multiple groups", "community_groups": ["tech", "social"], "scheduled_for": "2024-12-01T10:00:00"}
+
+# Comments start with # and are ignored
+# Empty lines are also ignored
+
+Another simple text post without any special formatting.
+
+# You can mix plain text and JSON formats in the same file
+{"content": "Final post with custom settings", "images": ["path/to/image1.jpg", "path/to/image2.png"], "community_groups": ["default"]}

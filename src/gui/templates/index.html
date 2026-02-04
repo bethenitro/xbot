@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Twitter Bot (Xbot) - Web Interface</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                <h2>🤖 Xbot</h2>
+            </div>
+            
+            <ul class="nav-menu">
+                <li><a href="#dashboard" class="nav-link active" data-section="dashboard">
+                    <i class="fas fa-tachometer-alt"></i> Dashboard
+                </a></li>
+                <li><a href="#accounts" class="nav-link" data-section="accounts">
+                    <i class="fas fa-users"></i> Accounts
+                </a></li>
+                <li><a href="#proxies" class="nav-link" data-section="proxies">
+                    <i class="fas fa-shield-alt"></i> Proxies
+                </a></li>
+                <li><a href="#posts" class="nav-link" data-section="posts">
+                    <i class="fas fa-edit"></i> Posts
+                </a></li>
+                <li><a href="#scheduler" class="nav-link" data-section="scheduler">
+                    <i class="fas fa-clock"></i> Scheduler
+                </a></li>
+                <li><a href="#settings" class="nav-link" data-section="settings">
+                    <i class="fas fa-cog"></i> Settings
+                </a></li>
+            </ul>
+            
+            <div class="bot-controls">
+                <button id="startBot" class="btn btn-success">
+                    <i class="fas fa-play"></i> Start Bot
+                </button>
+                <button id="stopBot" class="btn btn-danger" disabled>
+                    <i class="fas fa-stop"></i> Stop Bot
+                </button>
+            </div>
+            
+            <div class="status-indicator">
+                <div class="status-dot stopped"></div>
+                <span id="statusText">Status: Stopped</span>
+            </div>
+        </nav>
+        
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Dashboard Section -->
+            <section id="dashboard" class="content-section active">
+                <div class="section-header">
+                    <h1>Dashboard</h1>
+                    <button id="refreshData" class="btn btn-outline">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3 id="accountCount">0</h3>
+                            <p>Total Accounts</p>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-shield-alt"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3 id="proxyCount">0</h3>
+                            <p>Active Proxies</p>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-list"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3 id="queueCount">0</h3>
+                            <p>Pending Posts</p>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3 id="successRate">0%</h3>
+                            <p>Success Rate</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="activity-log">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Activity Log</h3>
+                            <button id="clearLog" class="btn btn-outline-sm">
+                                <i class="fas fa-trash"></i> Clear
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div id="logContainer" class="log-container">
+                                <div class="log-entry">
+                                    <span class="log-time">00:00:00</span>
+                                    <span class="log-message">Bot initialized successfully</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Accounts Section -->
+            <section id="accounts" class="content-section">
+                <div class="section-header">
+                    <h1>Account Management</h1>
+                    <button id="addAccount" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Add Account
+                    </button>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Twitter Accounts</h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="accountsList" class="accounts-list">
+                            <div class="empty-state">
+                                <i class="fas fa-users"></i>
+                                <p>No accounts added yet</p>
+                                <small>Click "Add Account" to get started</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Proxies Section -->
+            <section id="proxies" class="content-section">
+                <div class="section-header">
+                    <h1>Proxy Management</h1>
+                    <div class="btn-group">
+                        <button id="addProxy" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> Add Proxy
+                        </button>
+                        <button id="importProxies" class="btn btn-outline">
+                            <i class="fas fa-upload"></i> Import
+                        </button>
+                        <button id="testAllProxies" class="btn btn-success">
+                            <i class="fas fa-bolt"></i> Test All
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Proxy List</h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="proxiesList" class="proxies-list">
+                            <div class="empty-state">
+                                <i class="fas fa-shield-alt"></i>
+                                <p>No proxies added yet</p>
+                                <small>Click "Add Proxy" to get started</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Posts Section -->
+            <section id="posts" class="content-section">
+                <div class="section-header">
+                    <h1>Post Management</h1>
+                </div>
+                
+                <div class="row" style="display: flex; gap: 20px; flex-wrap: wrap;">
+                    <div class="card" style="flex: 1; min-width: 300px;">
+                        <div class="card-header">
+                            <h3>Caption Library</h3>
+                            <button id="addCaption" class="btn btn-primary" onclick="app.showAddCaptionModal()">
+                                <i class="fas fa-plus"></i> Add
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div id="captionsList" class="caption-list" style="max-height: 400px; overflow-y: auto;">
+                                <div class="empty-state">
+                                    <i class="fas fa-font"></i>
+                                    <p>No captions</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card" style="flex: 1; min-width: 300px;">
+                        <div class="card-header">
+                            <h3>Image Library</h3>
+                            <button id="addImageGroup" class="btn btn-primary" onclick="app.showAddImageGroupModal()">
+                                <i class="fas fa-plus"></i> Add
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div id="imageGroupsList" class="image-list" style="max-height: 400px; overflow-y: auto;">
+                                <div class="empty-state">
+                                    <i class="fas fa-images"></i>
+                                    <p>No image groups</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Communities</h3>
+                        <div class="btn-group">
+                            <button id="addCommunity" class="btn btn-primary">
+                                <i class="fas fa-plus"></i> Add Community
+                            </button>
+                            <button id="bulkImportCommunities" class="btn btn-outline">
+                                <i class="fas fa-upload"></i> Bulk Import
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="communitiesList" class="communities-list">
+                            <div class="empty-state">
+                                <i class="fas fa-home"></i>
+                                <p>No communities added yet</p>
+                                <small>Click "Add Community" or "Bulk Import" to get started</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Quick Post</h3>
+                    </div>
+                    <div class="card-body">
+                        <form id="quickPostForm">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="communitySelect">Community</label>
+                                    <select id="communitySelect" class="form-control">
+                                        <option value="">No communities available</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="accountSelect">Account</label>
+                                    <select id="accountSelect" class="form-control">
+                                        <option value="">No accounts available</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="postContent">Post Content</label>
+                                <textarea id="postContent" class="form-control" rows="4" 
+                                          placeholder="Enter your post content here..."></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="imageUpload">Images (optional)</label>
+                                <input type="file" id="imageUpload" class="form-control" 
+                                       accept="image/*" multiple>
+                                <small class="help-text">Select up to 4 images to attach to your post</small>
+                                <div id="imagePreview" class="image-preview"></div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="useProxy" checked> Use Proxy
+                                    </label>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="headlessMode" checked> Headless Mode
+                                    </label>
+                                </div>
+                                <div class="form-group">
+                                    <button type="button" id="addToQueue" class="btn btn-outline">
+                                        <i class="fas fa-plus"></i> Add to Queue
+                                    </button>
+                                    <button type="button" id="postNow" class="btn btn-warning">
+                                        <i class="fas fa-paper-plane"></i> Post Now
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Scheduler Section -->
+            <section id="scheduler" class="content-section">
+                <div class="section-header">
+                    <h1>Scheduler Control</h1>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Scheduler Status</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="scheduler-status">
+                            <div class="status-info">
+                                <i class="fas fa-clock fa-2x"></i>
+                                <div>
+                                    <h4>Status: Stopped</h4>
+                                    <p>Next post: Not scheduled</p>
+                                </div>
+                            </div>
+                            <div class="scheduler-controls">
+                                <button id="startScheduler" class="btn btn-success">
+                                    <i class="fas fa-play"></i> Start Scheduler
+                                </button>
+                                <button id="stopScheduler" class="btn btn-danger" disabled>
+                                    <i class="fas fa-stop"></i> Stop Scheduler
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Scheduler Settings</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="communityCycling" checked> 
+                                    Community Cycling
+                                </label>
+                                <small class="help-text">Restart from community 1 when finished</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="postingInterval">Base Posting Interval (seconds)</label>
+                                <input type="number" id="postingInterval" class="form-control" value="3600" min="300" max="86400">
+                                <small class="help-text">Base time between posts (300-86400 seconds)</small>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="randomnessPercent">Randomness (%)</label>
+                                <input type="number" id="randomnessPercent" class="form-control" value="25" min="0" max="50">
+                                <small class="help-text">±25% = 3600s becomes 2700-4500s randomly</small>
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="refreshCookies" checked> 
+                                    Auto-refresh Cookies
+                                </label>
+                                <small class="help-text">Update cookies after each successful post</small>
+                            </div>
+                        </div>
+                        <p class="help-text">
+                            🔄 <strong>Community Cycling:</strong> Automatically restart from community 1 after finishing the last community<br>
+                            🎲 <strong>Randomness:</strong> Adds random variation to posting intervals to avoid detection patterns<br>
+                            🍪 <strong>Cookie Refresh:</strong> Keeps login sessions fresh and valid<br>
+                            🛡️ <strong>Stealth Mode:</strong> Enabled by default with consistent fingerprints per account
+                        </p>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Settings Section -->
+            <section id="settings" class="content-section">
+                <div class="section-header">
+                    <h1>Settings</h1>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Browser Configuration</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="browser-selection">
+                            <div class="form-group">
+                                <label for="browserType">Browser Engine</label>
+                                <select id="browserType" class="form-control" disabled>
+                                    <option value="camoufox">Camoufox (Firefox-based)</option>
+                                    <option value="patchright">Patchright (Chromium-based)</option>
+                                    <option value="zendriver">ZenDriver (Chrome CDP)</option>
+                                </select>
+                                <small class="help-text">
+                                    <span id="browserStatus">Browser selection will be available on next startup</span>
+                                </small>
+                            </div>
+                            <div class="form-group">
+                                <button type="button" id="selectBrowserBtn" class="btn btn-primary">
+                                    <i class="fas fa-browser"></i> Select Browser Engine
+                                </button>
+                                <small class="help-text">Choose between Camoufox (Firefox), Patchright (Chrome), or ZenDriver (CDP) for this session</small>
+                            </div>
+                            <div id="browserInfo" class="browser-info">
+                                <div class="browser-details">
+                                    <h4 id="selectedBrowserName">No Browser Selected</h4>
+                                    <p id="selectedBrowserDesc">Please select a browser engine to continue</p>
+                                    <ul id="selectedBrowserFeatures">
+                                        <li>Browser selection required for account management</li>
+                                        <li>Each browser offers different stealth capabilities</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Bot Configuration</h3>
+                    </div>
+                    <div class="card-body">
+                        <form id="configForm">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="headlessDefault" checked> 
+                                        Default Headless Mode
+                                    </label>
+                                    <small class="help-text">Run browser in background without UI</small>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="autoSave" checked> 
+                                        Auto-save Sessions
+                                    </label>
+                                    <small class="help-text">Automatically save login sessions</small>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="stealthMode" checked> 
+                                        Enable Stealth Mode
+                                    </label>
+                                    <small class="help-text">Use advanced anti-detection features</small>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="useProxiesDefault" checked> 
+                                        Use Proxies by Default
+                                    </label>
+                                    <small class="help-text">Enable proxy usage for new accounts</small>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="postingInterval">Posting Interval (seconds)</label>
+                                    <input type="number" id="postingInterval" class="form-control" 
+                                           value="3600" min="60" max="86400">
+                                    <small class="help-text">Time between posts (60-86400 seconds)</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="maxRetries">Max Retries</label>
+                                    <input type="number" id="maxRetries" class="form-control" 
+                                           value="3" min="1" max="10">
+                                    <small class="help-text">Maximum retry attempts for failed operations</small>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <button type="button" id="saveConfig" class="btn btn-success">
+                                    <i class="fas fa-save"></i> Save Configuration
+                                </button>
+                                <button type="button" id="resetConfig" class="btn btn-warning">
+                                    <i class="fas fa-undo"></i> Reset to Defaults
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Data Management</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="btn-group">
+                            <button id="exportData" class="btn btn-outline">
+                                <i class="fas fa-download"></i> Export Data
+                            </button>
+                            <button id="importData" class="btn btn-outline">
+                                <i class="fas fa-upload"></i> Import Data
+                            </button>
+                            <button id="clearAllData" class="btn btn-danger">
+                                <i class="fas fa-trash"></i> Clear All Data
+                            </button>
+                        </div>
+                        <p class="help-text">
+                            Export your accounts, proxies, communities, and posts for backup or transfer to another instance.
+                        </p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    
+    <!-- Modals -->
+    <div id="modal" class="modal">
+        <div class="modal-overlay" onclick="app.handleModalOverlayClick(event)"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">Modal Title</h3>
+                <button class="modal-close" onclick="app.hideModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Modal content will be inserted here -->
+            </div>
+            <div class="modal-footer" id="modalFooter">
+                <!-- Modal buttons will be inserted here -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+    
+    <!-- Browser Selection Modal -->
+    <div id="browserSelectionModal" class="modal browser-selection-modal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Select Browser Engine</h3>
+                <p>Choose the browser engine for this session. This cannot be changed once selected.</p>
+            </div>
+            <div class="modal-body">
+                <div class="browser-options">
+                    <div class="browser-option" data-browser="camoufox">
+                        <div class="browser-icon">🦊</div>
+                        <div class="browser-info">
+                            <h4>Camoufox</h4>
+                            <p>Firefox-based browser with advanced anti-detection</p>
+                            <ul class="feature-list">
+                                <li>Advanced fingerprint spoofing</li>
+                                <li>Built-in stealth capabilities</li>
+                                <li>BrowserForge integration</li>
+                                <li>Automatic humanization</li>
+                            </ul>
+                            <div class="browser-status" id="camoufoxStatus">
+                                <span class="status-indicator checking">Checking availability...</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="browser-option" data-browser="patchright">
+                        <div class="browser-icon">🚀</div>
+                        <div class="browser-info">
+                            <h4>Patchright</h4>
+                            <p>Patched Playwright with enhanced stealth features</p>
+                            <ul class="feature-list">
+                                <li>Chromium-based stealth</li>
+                                <li>Advanced anti-detection patches</li>
+                                <li>High compatibility</li>
+                                <li>Fast performance</li>
+                            </ul>
+                            <div class="browser-status" id="patchrightStatus">
+                                <span class="status-indicator checking">Checking availability...</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="browser-option" data-browser="zendriver">
+                        <div class="browser-icon">⚡</div>
+                        <div class="browser-info">
+                            <h4>ZenDriver</h4>
+                            <p>Chrome DevTools Protocol-based automation (no WebDriver)</p>
+                            <ul class="feature-list">
+                                <li>Maximum stealth (no WebDriver)</li>
+                                <li>Chrome DevTools Protocol</li>
+                                <li>Blazing fast performance</li>
+                                <li>Undetectable by anti-bot systems</li>
+                            </ul>
+                            <div class="browser-status" id="zendriverStatus">
+                                <span class="status-indicator checking">Checking availability...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="confirmBrowserSelection" class="btn btn-primary" disabled>
+                    <i class="fas fa-check"></i> Confirm Selection
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
