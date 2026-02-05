@@ -101,26 +101,30 @@ class QueueManager:
             if not captions_data:
                 return None
 
-            # Load image groups - strict requirement for images
+            # Load image groups - OPTIONAL (images are no longer required)
+            images = []  # Default to empty list (text-only post)
             img_file = Path("data/image_groups.json")
-            if not img_file.exists():
-                return None
-            
-            groups = json.loads(img_file.read_text(encoding='utf-8'))
-            if not groups:
-                return None
+            if img_file.exists():
+                try:
+                    groups = json.loads(img_file.read_text(encoding='utf-8'))
+                    if groups:
+                        # Pick random image group and select only ONE image from it
+                        group = random.choice(groups)
+                        all_images = group['images']
+                        
+                        # Select only one random image from the group
+                        selected_image = random.choice(all_images)
+                        images = [selected_image]  # Single image in list
+                        self.logger.debug(f"Selected image: {selected_image}")
+                except Exception as img_error:
+                    self.logger.warning(f"Could not load images, creating text-only post: {img_error}")
+                    images = []
+            else:
+                self.logger.info("No image_groups.json found, creating text-only post")
                 
             # Pick random caption
             caption_obj = random.choice(captions_data)
             content = caption_obj['content']
-            
-            # Pick random image group and select only ONE image from it
-            group = random.choice(groups)
-            all_images = group['images']
-            
-            # Select only one random image from the group
-            selected_image = random.choice(all_images)
-            images = [selected_image]  # Single image in list
             
             # Create a Post object
             post_id = f"dynamic_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:6]}"
@@ -132,7 +136,12 @@ class QueueManager:
                 status=PostStatus.PENDING,
                 created_at=datetime.now()
             )
-            self.logger.info(f"Generated dynamic post {post_id} with 1 image: {selected_image}")
+            
+            if images:
+                self.logger.info(f"Generated dynamic post {post_id} with 1 image: {images[0]}")
+            else:
+                self.logger.info(f"Generated dynamic text-only post {post_id}")
+            
             return post
             
         except Exception as e:

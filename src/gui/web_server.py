@@ -2136,7 +2136,7 @@ class WebGUIServer:
             self.logger.info("Browser event loop initialized")
             
             self.logger.info(f"Starting web GUI server on http://{host}:{port}")
-            print(f"🚀 Web GUI available at: http://{host}:{port}")
+            print(f"Web GUI available at: http://{host}:{port}")
             self.socketio.run(self.app, host=host, port=port, debug=debug, use_reloader=False)
         except Exception as e:
             self.logger.error(f"Web server error: {e}")
