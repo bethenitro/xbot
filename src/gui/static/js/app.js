@@ -134,6 +134,10 @@ class XbotWebInterface {
             document.getElementById('startBot')?.addEventListener('click', () => this.startBot());
             document.getElementById('stopBot')?.addEventListener('click', () => this.stopBot());
             
+            // Reply controls
+            document.getElementById('startReplies')?.addEventListener('click', () => this.startReplies());
+            document.getElementById('stopReplies')?.addEventListener('click', () => this.stopReplies());
+            
             // Scheduler controls (same as bot controls)
             document.getElementById('startScheduler')?.addEventListener('click', () => this.startBot());
             document.getElementById('stopScheduler')?.addEventListener('click', () => this.stopBot());
@@ -554,6 +558,44 @@ class XbotWebInterface {
         } catch (error) {
             this.showToast('Failed to stop bot', 'error');
             console.error('Failed to stop bot:', error);
+        }
+    }
+    
+    async startReplies() {
+        try {
+            const response = await fetch('/api/replies/start', { method: 'POST' });
+            const data = await response.json();
+            
+            if (data.success) {
+                this.showToast('Automated replies started successfully', 'success');
+                this.addLogEntry('Automated replies started');
+                document.getElementById('startReplies').disabled = true;
+                document.getElementById('stopReplies').disabled = false;
+            } else {
+                this.showToast('Failed to start replies: ' + data.error, 'error');
+            }
+        } catch (error) {
+            this.showToast('Failed to start replies', 'error');
+            console.error('Failed to start replies:', error);
+        }
+    }
+    
+    async stopReplies() {
+        try {
+            const response = await fetch('/api/replies/stop', { method: 'POST' });
+            const data = await response.json();
+            
+            if (data.success) {
+                this.showToast('Automated replies stopped successfully', 'success');
+                this.addLogEntry('Automated replies stopped');
+                document.getElementById('startReplies').disabled = false;
+                document.getElementById('stopReplies').disabled = true;
+            } else {
+                this.showToast('Failed to stop replies: ' + data.error, 'error');
+            }
+        } catch (error) {
+            this.showToast('Failed to stop replies', 'error');
+            console.error('Failed to stop replies:', error);
         }
     }
     
@@ -1886,6 +1928,12 @@ class XbotWebInterface {
         // Concurrent browsers setting
         document.getElementById('maxConcurrentBrowsers').value = config.browser_settings?.max_concurrent_browsers || 1;
         this.updateConcurrentBrowsersDisplay(config.browser_settings?.max_concurrent_browsers || 1);
+        
+        // Reply interval settings - use window.intervalSelector
+        const replyInterval = config.reply_settings?.reply_interval || 300;
+        if (window.intervalSelector) {
+            window.intervalSelector.setReplyFromSeconds(replyInterval);
+        }
     }
     
     async saveConfig() {
@@ -1906,6 +1954,9 @@ class XbotWebInterface {
                 // Use value from the main scheduler input on dashboard
                 default: parseInt(document.getElementById('postingInterval').value) || 3600,
                 randomness_percent: parseInt(document.getElementById('randomnessPercent').value) || 25
+            },
+            reply_settings: {
+                reply_interval: parseInt(document.getElementById('replyInterval').value) || 300
             },
             error_handling: {
                 max_retries: parseInt(document.getElementById('maxRetries').value) || 3

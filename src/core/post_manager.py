@@ -57,12 +57,22 @@ class PostManager:
         self.stealth_engine = StealthEngine(self.config.stealth_settings.__dict__)
         self.error_handler = ErrorHandler(self.config.error_handling.__dict__)
         
-        # Operation state
+        # Operation state - Posting
         self.is_running = False
         self.is_paused = False
         self.posting_thread: Optional[threading.Thread] = None
         self.posting_loop: Optional[asyncio.AbstractEventLoop] = None
         self.stop_event = threading.Event()
+        
+        # Operation state - Replies (separate from posting)
+        self.is_reply_running = False
+        self.is_reply_paused = False
+        self.reply_thread: Optional[threading.Thread] = None
+        self.reply_loop: Optional[asyncio.AbstractEventLoop] = None
+        self.reply_stop_event = threading.Event()
+        self.next_reply_time = None
+        self.reply_interval_base = getattr(self.config, 'reply_settings', None).reply_interval if getattr(self.config, 'reply_settings', None) else 300
+        self.reply_randomness = getattr(self.config, 'reply_settings', None).randomness_percent if getattr(self.config, 'reply_settings', None) else 25
         
         # Community cycling state
         self.cycle_communities = True
@@ -170,6 +180,166 @@ class PostManager:
         except Exception as e:
             self.logger.error(f"Failed to pause posting: {e}")
             return False
+    
+    def start_replies(self) -> bool:
+        """
+        Start automated reply operations (separate from posting).
+        
+        Returns:
+            True if started successfully, False otherwise
+        """
+        try:
+            if self.is_reply_running:
+                self.logger.warning("Replies are already running")
+                return False
+            
+            self.logger.info("Starting automated reply operations...")
+            
+            # Start reply thread
+            self.is_reply_running = True
+            self.is_reply_paused = False
+            self.reply_stop_event.clear()
+            
+            self.reply_thread = threading.Thread(target=self._reply_loop, daemon=True)
+            self.reply_thread.start()
+            
+            self.logger.info("Reply operations thread started")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to start replies: {e}")
+            return False
+    
+    def stop_replies(self) -> bool:
+        """
+        Stop automated reply operations.
+        
+        Returns:
+            True if stopped successfully, False otherwise
+        """
+        try:
+            if not self.is_reply_running:
+                self.logger.warning("Replies are not running")
+                return False
+            
+            self.logger.info("Stopping reply operations...")
+            
+            # Signal stop and wait for thread
+            self.reply_stop_event.set()
+            self.is_reply_running = False
+            
+            if self.reply_thread and self.reply_thread.is_alive():
+                self.reply_thread.join(timeout=15)
+            
+            self.logger.info("Reply operations stopped")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to stop replies: {e}")
+            return False
+    
+    def pause_replies(self) -> bool:
+        """
+        Pause reply operations.
+        
+        Returns:
+            True if paused successfully, False otherwise
+        """
+        try:
+            if not self.is_reply_running:
+                self.logger.warning("Cannot pause - replies are not running")
+                return False
+            
+            self.is_reply_paused = not self.is_reply_paused
+            status = "Paused" if self.is_reply_paused else "Running"
+            
+            self.logger.info(f"Reply operations {status.lower()}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to pause replies: {e}")
+            return False
+    
+    def _reply_loop(self) -> None:
+        """Automated reply loop running in separate thread."""
+        # Create dedicated event loop for reply thread
+        self.reply_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.reply_loop)
+        
+        try:
+            self.logger.info("Reply loop started with dedicated event loop")
+            
+            # Schedule first reply to happen immediately
+            try:
+                from datetime import datetime
+                self.next_reply_time = datetime.now()
+                self.logger.info(f"First reply scheduled at {self.next_reply_time} (immediately)")
+            except Exception:
+                self.next_reply_time = None
+            
+            while self.is_reply_running and not self.reply_stop_event.is_set():
+                try:
+                    # Check if paused
+                    if self.is_reply_paused:
+                        time.sleep(5)
+                        continue
+                    
+                    # Check if it's time to send a reply
+                    if self.next_reply_time:
+                        from datetime import datetime
+                        now = datetime.now()
+                        if now >= self.next_reply_time:
+                            try:
+                                # Load accounts if needed
+                                if not self.active_accounts_list:
+                                    self._load_accounts_list()
+                                
+                                # Select account to use for reply
+                                account = self._get_current_account()
+                                if account:
+                                    # Pick random caption and images (force image for replies)
+                                    content, images = self._select_random_caption_and_images(force_image=True)
+                                    self.logger.info(f"Automated reply: @{account.username} -> '{content[:30]}...' (images={len(images)})")
+                                    result = self.reply_loop.run_until_complete(
+                                        self._reply_to_random_tweet(account, content, images)
+                                    )
+                                    if result:
+                                        self.logger.info("✅ Automated reply sent successfully")
+                                    else:
+                                        self.logger.warning("❌ Automated reply failed")
+                                    # Advance account for next reply
+                                    self._advance_to_next_account()
+                                else:
+                                    self.logger.warning("No account available for automated reply")
+                            except Exception as e:
+                                self.logger.error(f"Error during automated reply: {e}")
+                            finally:
+                                # Schedule next reply
+                                try:
+                                    self._schedule_next_reply()
+                                    self.logger.info(f"Next reply scheduled at {self.next_reply_time}")
+                                except Exception:
+                                    self.next_reply_time = None
+                                time.sleep(2)
+                        else:
+                            # Wait until next reply time
+                            time.sleep(5)
+                    else:
+                        # No reply scheduled, wait
+                        time.sleep(10)
+                    
+                except Exception as e:
+                    self.logger.error(f"Error in reply loop: {e}")
+                    time.sleep(10)
+            
+            self.logger.info("Reply loop stopping...")
+            
+        except Exception as e:
+            self.logger.error(f"Fatal error in reply loop: {e}")
+        finally:
+            self.reply_loop.close()
+            self.reply_loop = None
+            self.logger.info("Reply loop thread ended and loop closed")
     
     def process_next_post(self) -> bool:
         """
@@ -482,6 +652,61 @@ class PostManager:
             next_index = 0  # Will cycle back to first
         
         return self.active_accounts_list[next_index].username
+
+    def _compute_next_reply_delay(self) -> int:
+        """Compute next reply delay (seconds) with configured randomness."""
+        try:
+            import random
+            base = int(self.reply_interval_base)
+            variation = int(base * (float(self.reply_randomness) / 100.0))
+            offset = random.randint(-variation, variation) if variation > 0 else 0
+            delay = max(1, base + offset)
+            return delay
+        except Exception:
+            return int(self.reply_interval_base)
+
+    def _schedule_next_reply(self) -> None:
+        """Set `self.next_reply_time` based on computed delay."""
+        from datetime import datetime, timedelta
+        seconds = self._compute_next_reply_delay()
+        self.next_reply_time = datetime.now() + timedelta(seconds=seconds)
+
+    def _select_random_caption_and_images(self, force_image: bool = False):
+        """Select a random caption from `data/captions.json` and 0-1 images from `data/images`.
+
+        Args:
+            force_image: If True, always include an image (for replies). If False, 70% chance.
+
+        Returns: (content:str, images: List[str])
+        """
+        try:
+            import random
+            captions_file = self.file_manager.captions_json_file
+            content = ""
+            if captions_file.exists():
+                data = captions_file.read_text(encoding='utf-8')
+                try:
+                    arr = __import__('json').loads(data)
+                    if isinstance(arr, list) and arr:
+                        item = random.choice(arr)
+                        content = item.get('content', '') if isinstance(item, dict) else str(item)
+                except Exception:
+                    content = data.strip().split('\n')[0] if data else ""
+
+            # Pick 0 or 1 image randomly
+            images_dir = self.file_manager.data_dir / 'images'
+            images = []
+            if images_dir.exists() and images_dir.is_dir():
+                files = [str(p) for p in images_dir.iterdir() if p.is_file()]
+                if files:
+                    # If force_image is True, always add an image. Otherwise 70% chance.
+                    if force_image or random.random() < 0.7:
+                        images = [random.choice(files)]
+
+            return content or "", images
+        except Exception as e:
+            self.logger.debug(f"Failed to select caption/images: {e}")
+            return "", []
     
     async def _initialize_browser_session(self) -> bool:
         """Initialize browser and session components."""
@@ -1555,7 +1780,10 @@ class PostManager:
                         # Click media button to potentially reveal the input - EXACT same as quick post
                         media_button = await browser.find_element(selectors['media_button'], timeout=5)
                         if media_button:
-                            pass  # Same logic as quick post
+                            # Scroll media button into view first to ensure it's accessible
+                            self.logger.info("Scrolling media button into view...")
+                            await browser.scroll_element_into_view(media_button)
+                            await asyncio.sleep(0.5)
                         
                         await asyncio.sleep(1.0)
                         file_input = await browser.find_element(selectors['media_upload'], timeout=5)
@@ -1601,6 +1829,252 @@ class PostManager:
         except Exception as e:
             self.logger.error(f"Error in image upload process: {e}")
             return False
+
+    async def _reply_to_random_tweet(self, account, content: str, image_paths: list = None, reply_number: int = 1, total_replies: int = 1) -> bool:
+        """
+        Reply to a randomly selected tweet that contains an image.
+
+        Steps:
+        - Navigate to https://x.com/home
+        - Scroll randomly up/down a few times
+        - Select a tweet that has an image and open it by clicking
+        - Ensure the inline reply button is visible and click it
+        - Optionally upload images and type a reply (random order)
+        - Click the reply/send button and wait for confirmation toast
+        """
+        browser = None
+        try:
+            import random
+            from ..browser.browser_factory import browser_factory
+
+            # Prepare proxy if needed
+            proxy_config = None
+            if account.use_proxy and account.preferred_proxy:
+                from ..proxy.proxy_manager import ProxyManager
+                proxy_manager = ProxyManager(self.config.to_dict())
+                if account.preferred_proxy in proxy_manager.proxies:
+                    proxy_data = proxy_manager.proxies[account.preferred_proxy]
+                    proxy_config = proxy_data.url
+
+            # Initialize browser
+            browser = browser_factory.create_driver(self.config.to_dict())
+            success = await browser.launch_browser(
+                proxy_config=proxy_config,
+                headless=False,
+                fingerprint_data=account.fingerprint_data,
+                account_username=account.username
+            )
+
+            if not success:
+                self.logger.error("Failed to launch browser for reply")
+                return False
+
+            # Load cookies
+            existing_cookies = await self.account_manager.load_account_cookies(account)
+            if existing_cookies:
+                await browser.set_cookies(existing_cookies)
+                self.logger.info(f"Loaded {len(existing_cookies)} cookies for reply account {account.username}")
+
+            config_dict = self.config.to_dict()
+            selectors = config_dict['automation']['selectors']
+            reply_cfg = getattr(self.config, 'reply_settings', None) or {}
+
+            # Go to home and perform human-like scrolling
+            self.logger.info("Reply flow: navigating to https://x.com/home")
+            await browser.navigate_to_url("https://x.com/home")
+            await asyncio.sleep(random.uniform(2.5, 4.5))
+
+            min_scroll = getattr(self.config, 'reply_settings', None).min_scroll_actions if getattr(self.config, 'reply_settings', None) else 2
+            max_scroll = getattr(self.config, 'reply_settings', None).max_scroll_actions if getattr(self.config, 'reply_settings', None) else 5
+            scroll_actions = random.randint(min_scroll, max_scroll)
+
+            for i in range(scroll_actions):
+                # Only scroll down initially (positive values only)
+                pixels = random.randint(100, 800)
+                await browser.scroll_page(pixels)
+                await asyncio.sleep(random.uniform(1.0, 2.5))
+
+            # Randomize behavior: sometimes visit another page before selecting tweet
+            visit_other_page = random.random() < 0.4  # 40% chance to visit another page
+            
+            if visit_other_page:
+                intermediate_pages = [
+                    "https://x.com/explore",
+                    "https://x.com/notifications",
+                    "https://x.com/i/bookmarks",
+                    "https://x.com/explore/tabs/trending",
+                    "https://x.com/explore/tabs/news"
+                ]
+                other_page = random.choice(intermediate_pages)
+                self.logger.info(f"Reply flow: visiting {other_page} before selecting tweet")
+                await browser.navigate_to_url(other_page)
+                await asyncio.sleep(random.uniform(2.0, 4.0))
+                
+                # Scroll a bit on the other page (only down initially)
+                for _ in range(random.randint(1, 2)):
+                    pixels = random.randint(100, 400)
+                    await browser.scroll_page(pixels)
+                    await asyncio.sleep(random.uniform(1.0, 2.0))
+                
+                # Go back to home
+                self.logger.info("Reply flow: returning to https://x.com/home")
+                await browser.navigate_to_url("https://x.com/home")
+                await asyncio.sleep(random.uniform(2.0, 3.5))
+                
+                # Do minimal scroll on home (1-2 times, only down)
+                minimal_scrolls = random.randint(1, 2)
+                for _ in range(minimal_scrolls):
+                    pixels = random.randint(100, 400)
+                    await browser.scroll_page(pixels)
+                    await asyncio.sleep(random.uniform(1.0, 2.0))
+
+            # Find tweets and pick one with an image
+            tweets = await browser.find_elements(selectors.get('tweet_container', "article[data-testid='tweet']"))
+            random.shuffle(tweets)
+
+            target_tweet = None
+            for t in tweets:
+                try:
+                    # Try to find a photo element inside the tweet
+                    # Use the photo selector without the article prefix for inside-query
+                    photo_selector = selectors.get('tweet_photo', "[data-testid='tweetPhoto']")
+                    # Many element objects expose query_selector
+                    photo = None
+                    if hasattr(t, 'query_selector'):
+                        try:
+                            photo = await t.query_selector(photo_selector)
+                        except Exception:
+                            photo = None
+
+                    if photo:
+                        target_tweet = t
+                        break
+                except Exception:
+                    continue
+
+            if not target_tweet:
+                self.logger.warning("No tweet with image found to reply to")
+                return False
+
+            # Open the tweet by clicking it
+            self.logger.info("Opening selected tweet to reply")
+            clicked = await browser.click_element(target_tweet)
+            if not clicked:
+                self.logger.error("Failed to click selected tweet")
+                return False
+
+            # Wait for tweet page to load
+            await asyncio.sleep(random.uniform(1.5, 3.0))
+
+            # Occasionally do a small scroll to bring reply UI into view
+            if random.random() < 0.6:
+                await browser.scroll_page(random.randint(0, 200))
+
+            # Find inline reply button
+            reply_btn = await browser.find_element(selectors.get('tweet_inline_button', "button[data-testid='tweetButtonInline']"), timeout=6)
+            if not reply_btn:
+                # Try a little scroll and retry
+                await browser.scroll_page(150)
+                await asyncio.sleep(0.8)
+                reply_btn = await browser.find_element(selectors.get('tweet_inline_button', "button[data-testid='tweetButtonInline']"), timeout=4)
+
+            if not reply_btn:
+                self.logger.error("Reply button not found on tweet page")
+                return False
+
+            # Click reply to open reply composer
+            success = await browser.click_element(reply_btn)
+            if not success:
+                self.logger.error("Failed to click reply button")
+                return False
+
+            await asyncio.sleep(random.uniform(0.8, 1.8))
+
+            # Decide order: upload images first or type text first
+            images_first = random.choice([True, False])
+
+            async def upload_action():
+                if image_paths:
+                    self.logger.info("Uploading reply image(s)")
+                    await asyncio.sleep(random.uniform(0.6, 1.4))
+                    await self._upload_images_like_quick_post(browser, image_paths, selectors)
+
+            async def type_action():
+                tb_selector = selectors.get('reply_textbox', selectors.get('compose_textbox'))
+                tb = await browser.find_element(tb_selector, timeout=5)
+                if not tb:
+                    self.logger.error("Reply textbox not found")
+                    return False
+                await asyncio.sleep(random.uniform(0.2, 0.6))
+                await browser.type_text_human_like(tb, content)
+                await asyncio.sleep(random.uniform(0.6, 1.6))
+                return True
+
+            if images_first:
+                await upload_action()
+                await type_action()
+            else:
+                await type_action()
+                await upload_action()
+
+            # Click the inline reply/send button
+            send_btn = await browser.find_element(selectors.get('tweet_inline_button', "button[data-testid='tweetButtonInline']"), timeout=8)
+            if not send_btn:
+                self.logger.error("Send/reply button not found")
+                return False
+
+            await asyncio.sleep(random.uniform(0.8, 1.6))
+            clicked = await browser.click_element(send_btn)
+            if not clicked:
+                self.logger.error("Failed to click send/reply button")
+                return False
+
+            # Wait for confirmation toast
+            toast_selector = "div[data-testid='toast']"
+            toast_found = False
+            for _ in range(30):
+                toast = await browser.find_element(toast_selector, timeout=1)
+                if toast:
+                    # Toast appeared - consider it success
+                    # Reading text from zendriver Element can be tricky, so just check presence
+                    try:
+                        # Try to get text via element property if available
+                        if hasattr(toast, 'text'):
+                            text = await toast.text if hasattr(toast.text, '__await__') else toast.text
+                            if text and 'Your post was sent' in str(text):
+                                toast_found = True
+                                break
+                        else:
+                            # If we can't get text, just accept toast presence as success
+                            toast_found = True
+                            break
+                    except Exception:
+                        # If any error, accept toast presence as success
+                        toast_found = True
+                        break
+                await asyncio.sleep(0.5)
+
+            if not toast_found:
+                self.logger.warning("Reply may not have been confirmed (toast not found)")
+                return False
+
+            # Human-like post-reply behavior
+            await asyncio.sleep(random.uniform(1.2, 2.8))
+            self.logger.info("Reply posted successfully")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error during reply process: {e}")
+            return False
+        finally:
+            if browser:
+                try:
+                    cookies = await browser.get_cookies()
+                    if cookies:
+                        await self.account_manager.save_account_cookies(account, cookies)
+                    await browser.close_browser()
+                except Exception as e:
+                    self.logger.error(f"Error cleaning up reply browser: {e}")
     
     async def _refresh_session_cookies(self, current_account=None) -> None:
         """Refresh session cookies to keep login fresh."""

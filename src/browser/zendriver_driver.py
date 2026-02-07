@@ -1161,3 +1161,191 @@ console.log('[Proxy Auth Extension] Loaded successfully - monitoring for proxy a
         except Exception as e:
             self.logger.error(f"Failed to refresh page: {e}")
             return False
+
+    async def element_has_child(self, parent_element: Any, child_selector: str) -> bool:
+        """
+        Check if a parent element has a child matching the selector.
+        
+        Args:
+            parent_element: Parent element to search within
+            child_selector: CSS selector for child element
+            
+        Returns:
+            True if child exists, False otherwise
+        """
+        try:
+            if not self.tab or not parent_element:
+                return False
+            
+            # Use querySelector on the parent element
+            script = f"""
+            (element) => {{
+                return element.querySelector('{child_selector}') !== null;
+            }}
+            """
+            
+            result = await parent_element.apply(script)
+            return bool(result)
+            
+        except Exception as e:
+            self.logger.debug(f"Error checking for child element: {e}")
+            return False
+    
+    async def find_element_in_parent(self, parent_element: Any, selector: str) -> Optional[Any]:
+        """
+        Find an element within a parent element.
+        
+        Args:
+            parent_element: Parent element to search within
+            selector: CSS selector for element to find
+            
+        Returns:
+            Element if found, None otherwise
+        """
+        try:
+            if not self.tab or not parent_element:
+                return None
+            
+            # Use querySelector on the parent element
+            script = f"""
+            (element) => {{
+                return element.querySelector('{selector}');
+            }}
+            """
+            
+            result = await parent_element.apply(script)
+            return result if result else None
+            
+        except Exception as e:
+            self.logger.debug(f"Error finding element in parent: {e}")
+            return None
+    
+    async def get_element_text(self, element: Any) -> str:
+        """
+        Get text content of an element.
+        
+        Args:
+            element: Element to get text from
+            
+        Returns:
+            Text content or empty string
+        """
+        try:
+            if not element:
+                return ""
+            
+            # Get text content
+            script = """
+            (element) => {
+                return element.textContent || element.innerText || '';
+            }
+            """
+            
+            text = await element.apply(script)
+            return str(text).strip() if text else ""
+            
+        except Exception as e:
+            self.logger.debug(f"Error getting element text: {e}")
+            return ""
+    
+    async def scroll_element_into_view(self, element: Any, smooth: bool = None) -> bool:
+        """
+        Scroll an element into view with human-like behavior.
+        
+        Args:
+            element: Element to scroll into view
+            smooth: Whether to use smooth scrolling (None = random choice)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if not element:
+                return False
+            
+            # Randomize behavior if not specified (70% smooth, 30% auto)
+            if smooth is None:
+                smooth = random.random() < 0.7
+            
+            behavior = "smooth" if smooth else "auto"
+            
+            # Randomize vertical alignment for natural variation
+            block_options = ['center', 'start', 'nearest']
+            block_weights = [0.6, 0.25, 0.15]  # Prefer center, but vary
+            block = random.choices(block_options, weights=block_weights)[0]
+            
+            # Occasionally use 'end' if element is far down
+            if random.random() < 0.1:
+                block = 'end'
+            
+            script = f"""
+            (element) => {{
+                element.scrollIntoView({{
+                    behavior: '{behavior}',
+                    block: '{block}',
+                    inline: 'nearest'
+                }});
+            }}
+            """
+            
+            await element.apply(script)
+            
+            # Variable wait based on scroll type
+            if smooth:
+                # Smooth scrolling takes longer
+                await asyncio.sleep(random.uniform(0.8, 1.5))
+            else:
+                # Auto scroll is instant but humans still pause
+                await asyncio.sleep(random.uniform(0.3, 0.7))
+            
+            # 15% chance: small adjustment scroll after main scroll (reading/positioning)
+            if random.random() < 0.15:
+                adjustment = random.randint(-50, 50)
+                await self.tab.evaluate(f"window.scrollBy({{top: {adjustment}, behavior: 'smooth'}})")
+                await asyncio.sleep(random.uniform(0.2, 0.5))
+            
+            # 20% chance: brief pause as if reading/locating element
+            if random.random() < 0.2:
+                await asyncio.sleep(random.uniform(0.3, 0.8))
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error scrolling element into view: {e}")
+            return False
+    
+    async def wait_for_element_with_text(self, selector: str, text: str, timeout: int = 10) -> Optional[Any]:
+        """
+        Wait for an element with specific text content to appear.
+        
+        Args:
+            selector: CSS selector for element
+            text: Text content to match
+            timeout: Maximum wait time in seconds
+            
+        Returns:
+            Element if found, None otherwise
+        """
+        try:
+            if not self.tab:
+                return None
+            
+            start_time = time.time()
+            
+            while time.time() - start_time < timeout:
+                elements = await self.find_elements(selector)
+                
+                for element in elements:
+                    element_text = await self.get_element_text(element)
+                    if text.lower() in element_text.lower():
+                        self.logger.debug(f"Found element with text: {text}")
+                        return element
+                
+                await asyncio.sleep(0.5)
+            
+            self.logger.debug(f"Element with text '{text}' not found within {timeout}s")
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Error waiting for element with text: {e}")
+            return None

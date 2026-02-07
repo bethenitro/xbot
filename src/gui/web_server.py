@@ -133,6 +133,11 @@ class WebGUIServer:
         self.stop_callback: Optional = None
         self.pause_callback: Optional = None
         
+        # Callbacks for reply operations
+        self.start_replies_callback: Optional = None
+        self.stop_replies_callback: Optional = None
+        self.pause_replies_callback: Optional = None
+        
         # Create Flask app
         self.app = Flask(__name__, 
                         template_folder=str(Path(__file__).parent / "templates"),
@@ -590,6 +595,45 @@ class WebGUIServer:
                     return jsonify({'success': False, 'error': 'Stop callback not set'})
             except Exception as e:
                 self.logger.error(f"Error stopping bot: {e}")
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/replies/start', methods=['POST'])
+        def start_replies():
+            """Start automated replies."""
+            try:
+                if self.start_replies_callback:
+                    threading.Thread(target=self.start_replies_callback, daemon=True).start()
+                    return jsonify({'success': True, 'message': 'Replies started'})
+                else:
+                    return jsonify({'success': False, 'error': 'Start replies callback not set'})
+            except Exception as e:
+                self.logger.error(f"Error starting replies: {e}")
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/replies/stop', methods=['POST'])
+        def stop_replies():
+            """Stop automated replies."""
+            try:
+                if self.stop_replies_callback:
+                    threading.Thread(target=self.stop_replies_callback, daemon=True).start()
+                    return jsonify({'success': True, 'message': 'Replies stopped'})
+                else:
+                    return jsonify({'success': False, 'error': 'Stop replies callback not set'})
+            except Exception as e:
+                self.logger.error(f"Error stopping replies: {e}")
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/replies/pause', methods=['POST'])
+        def pause_replies():
+            """Pause automated replies."""
+            try:
+                if self.pause_replies_callback:
+                    threading.Thread(target=self.pause_replies_callback, daemon=True).start()
+                    return jsonify({'success': True, 'message': 'Replies paused/resumed'})
+                else:
+                    return jsonify({'success': False, 'error': 'Pause replies callback not set'})
+            except Exception as e:
+                self.logger.error(f"Error pausing replies: {e}")
                 return jsonify({'success': False, 'error': str(e)})
         
         @self.app.route('/api/config', methods=['GET'])
@@ -2118,11 +2162,15 @@ class WebGUIServer:
                 'next_post_time': None
             }
     
-    def set_callbacks(self, start_callback=None, stop_callback=None, pause_callback=None):
+    def set_callbacks(self, start_callback=None, stop_callback=None, pause_callback=None, 
+                     start_replies_callback=None, stop_replies_callback=None, pause_replies_callback=None):
         """Set callback functions for bot operations."""
         self.start_callback = start_callback
         self.stop_callback = stop_callback
         self.pause_callback = pause_callback
+        self.start_replies_callback = start_replies_callback
+        self.stop_replies_callback = stop_replies_callback
+        self.pause_replies_callback = pause_replies_callback
     
     def set_post_manager(self, post_manager):
         """Set the post manager instance."""

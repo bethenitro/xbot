@@ -76,10 +76,29 @@ class AutomationSettings:
                 "tweet_button": "[data-testid='tweetButton']",
                 "media_upload": "input[data-testid='fileInput']",
                 "media_button": "[data-testid='fileInput']",
+                # Tweet / Reply selectors
+                "tweet_container": "article[data-testid='tweet']",
+                "tweet_text": "article[data-testid='tweet'] [data-testid='tweetText']",
+                "tweet_user": "article[data-testid='tweet'] [data-testid='User-Name']",
+                "tweet_photo": "[data-testid='tweetPhoto']",
+                "tweet_inline_button": "button[data-testid='tweetButtonInline']",
+                "reply_textbox": "div[data-testid='tweetTextarea_0']",
+                "file_input": "input[type='file']",
+                "add_media_button": "button[aria-label='Add photos or video']",
                 "join_button": "//button[normalize-space(.)='Join']",
                 "joined_button": "//button[.//span[text()='Joined']]",
                 "agree_join_button": "//button[.//span[normalize-space(text())='Agree and join']]"
             }
+
+
+@dataclass
+class ReplySettings:
+    """Configuration for automated reply posting."""
+    enabled: bool = False               # Enable reply posting feature
+    reply_interval: int = 300           # Default reply interval in seconds (5 minutes)
+    randomness_percent: int = 25        # Randomness percentage for reply intervals
+    min_scroll_actions: int = 2         # Minimum scroll actions before selecting tweet
+    max_scroll_actions: int = 5         # Maximum scroll actions before selecting tweet
 
 
 @dataclass
@@ -100,6 +119,7 @@ class ConfigSchema:
     stealth_settings: StealthSettings
     browser_settings: BrowserSettings
     session_settings: SessionSettings
+    reply_settings: ReplySettings
     error_handling: ErrorHandling
     automation: AutomationSettings = None
 
@@ -151,6 +171,13 @@ class ConfigSchema:
                 'auto_save_cookies': self.session_settings.auto_save_cookies,
                 'max_session_age': self.session_settings.max_session_age
             },
+            'reply_settings': {
+                'enabled': self.reply_settings.enabled,
+                'reply_interval': self.reply_settings.reply_interval,
+                'randomness_percent': self.reply_settings.randomness_percent,
+                'min_scroll_actions': self.reply_settings.min_scroll_actions,
+                'max_scroll_actions': self.reply_settings.max_scroll_actions
+            },
             'error_handling': {
                 'max_retries': self.error_handling.max_retries,
                 'retry_delay_base': self.error_handling.retry_delay_base,
@@ -172,6 +199,7 @@ class ConfigSchema:
             stealth_settings=StealthSettings(**data.get('stealth_settings', {})),
             browser_settings=BrowserSettings(**data.get('browser_settings', {})),
             session_settings=SessionSettings(**data.get('session_settings', {})),
+            reply_settings=ReplySettings(**data.get('reply_settings', {})),
             error_handling=ErrorHandling(**data.get('error_handling', {})),
             automation=AutomationSettings(**data.get('automation', {}))
         )
@@ -236,5 +264,6 @@ DEFAULT_CONFIG = ConfigSchema(
     stealth_settings=StealthSettings(),
     browser_settings=BrowserSettings(),
     session_settings=SessionSettings(),
+    reply_settings=ReplySettings(),
     error_handling=ErrorHandling()
 )

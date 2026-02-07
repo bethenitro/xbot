@@ -40,12 +40,15 @@
             </ul>
             
             <div class="bot-controls">
-                <button id="startBot" class="btn btn-success">
-                    <i class="fas fa-play"></i> Start Bot
-                </button>
-                <button id="stopBot" class="btn btn-danger" disabled>
-                    <i class="fas fa-stop"></i> Stop Bot
-                </button>
+                <div class="control-group">
+                    <label style="color: #fff; font-size: 12px; margin-bottom: 5px; display: block;">Scheduled Posting</label>
+                    <button id="startBot" class="btn btn-success btn-sm">
+                        <i class="fas fa-play"></i> Start
+                    </button>
+                    <button id="stopBot" class="btn btn-danger btn-sm" disabled>
+                        <i class="fas fa-stop"></i> Stop
+                    </button>
+                </div>
             </div>
             
             <div class="status-indicator">
@@ -356,6 +359,31 @@
                 
                 <div class="card">
                     <div class="card-header">
+                        <h3>Automated Replies</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="scheduler-status">
+                            <div class="status-info">
+                                <i class="fas fa-reply fa-2x"></i>
+                                <div>
+                                    <h4>Auto-Reply Status: Stopped</h4>
+                                    <p>Automatically reply to random tweets with images</p>
+                                </div>
+                            </div>
+                            <div class="scheduler-controls">
+                                <button id="startReplies" class="btn btn-success">
+                                    <i class="fas fa-play"></i> Start Replies
+                                </button>
+                                <button id="stopReplies" class="btn btn-danger" disabled>
+                                    <i class="fas fa-stop"></i> Stop Replies
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
                         <h3>Scheduler Settings</h3>
                     </div>
                     <div class="card-body">
@@ -412,6 +440,40 @@
                                 <small class="help-text">Update cookies after each successful post</small>
                             </div>
                         </div>
+                        
+                        <div class="form-row" style="border-top: 1px solid #2d3748; padding-top: 20px; margin-top: 20px;">
+                            <div class="form-group" style="width: 100%;">
+                                <label for="replyInterval"><i class="fas fa-reply"></i> Reply Interval</label>
+                                <div class="interval-selector">
+                                    <div class="interval-inputs">
+                                        <div class="interval-input-group">
+                                            <input type="number" id="replyIntervalDays" class="form-control interval-input" value="0" min="0" max="365">
+                                            <label>Days</label>
+                                        </div>
+                                        <div class="interval-input-group">
+                                            <input type="number" id="replyIntervalHours" class="form-control interval-input" value="0" min="0" max="23">
+                                            <label>Hours</label>
+                                        </div>
+                                        <div class="interval-input-group">
+                                            <input type="number" id="replyIntervalMinutes" class="form-control interval-input" value="5" min="0" max="59">
+                                            <label>Minutes</label>
+                                        </div>
+                                        <div class="interval-input-group">
+                                            <input type="number" id="replyIntervalSeconds" class="form-control interval-input" value="0" min="0" max="59">
+                                            <label>Seconds</label>
+                                        </div>
+                                    </div>
+                                    <div class="interval-display">
+                                        <span>Total: </span>
+                                        <span id="totalReplyIntervalDisplay" class="total-interval">5 minutes</span>
+                                        <span class="total-seconds">(<span id="totalReplySeconds">300</span> seconds)</span>
+                                    </div>
+                                    <input type="hidden" id="replyInterval" value="300">
+                                </div>
+                                <small class="help-text">Set the base time between automated replies</small>
+                            </div>
+                        </div>
+                        
                         <div class="form-row">
                             <button id="saveSchedulerSettings" class="btn btn-primary" style="width: 100%;">
                                 <i class="fas fa-save"></i> Save Scheduler Settings

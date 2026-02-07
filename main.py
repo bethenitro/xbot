@@ -157,7 +157,10 @@ def main():
             gui.set_callbacks(
                 start_callback=post_manager.start_posting,
                 stop_callback=post_manager.stop_posting,
-                pause_callback=post_manager.pause_posting
+                pause_callback=post_manager.pause_posting,
+                start_replies_callback=post_manager.start_replies,
+                stop_replies_callback=post_manager.stop_replies,
+                pause_replies_callback=post_manager.pause_replies
             )
             
             post_manager.set_callbacks(
