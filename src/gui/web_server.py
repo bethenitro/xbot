@@ -314,7 +314,7 @@ class WebGUIServer:
         
         @self.app.route('/api/accounts/open', methods=['POST'])
         def open_account_browser():
-            """Open browser for existing account."""
+            """Open browser for existing account - allows multiple instances."""
             try:
                 data = request.get_json()
                 username = data.get('username')
@@ -326,8 +326,9 @@ class WebGUIServer:
                     return jsonify({'success': False, 'error': 'Account not found'})
                 
                 # Start browser session using persistent event loop
+                # Removed the check for existing sessions to allow multiple browser instances
                 success = browser_event_loop.run_coroutine(
-                    self.account_manager.open_account_browser(username)
+                    self.account_manager.open_account_browser(username, allow_multiple=True)
                 )
                 
                 if success:
@@ -412,6 +413,22 @@ class WebGUIServer:
                     return jsonify({'success': False, 'error': 'Failed to remove account'})
             except Exception as e:
                 self.logger.error(f"Error removing account: {e}")
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/accounts/<username>/toggle', methods=['PUT'])
+        def toggle_account(username):
+            """Toggle account active status."""
+            try:
+                success = self.account_manager.toggle_account_status(username)
+                if success:
+                    account = self.account_manager.get_account(username)
+                    status = "activated" if account.is_active else "deactivated"
+                    self.broadcast_log_entry(f"Account @{username} {status}")
+                    return jsonify({'success': True, 'message': f'Account {status}', 'is_active': account.is_active})
+                else:
+                    return jsonify({'success': False, 'error': 'Failed to toggle account status'})
+            except Exception as e:
+                self.logger.error(f"Error toggling account: {e}")
                 return jsonify({'success': False, 'error': str(e)})
         
         @self.app.route('/api/accounts/<username>/proxy', methods=['PUT'])
@@ -932,6 +949,119 @@ class WebGUIServer:
                 return jsonify({'success': True, 'message': 'Caption deleted'})
             except Exception as e:
                 return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/captions/delete-all', methods=['DELETE'])
+        def delete_all_captions():
+            """Delete all captions."""
+            try:
+                captions_file = Path("data/captions.json")
+                captions_file.write_text(json.dumps([], indent=2), encoding='utf-8')
+                self.broadcast_log_entry("All captions deleted")
+                return jsonify({'success': True, 'message': 'All captions deleted'})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+        
+        # Content Pairing API
+        @self.app.route('/api/content-pairs', methods=['GET'])
+        def get_content_pairs():
+            """Get all content pairs (caption + photo + account)."""
+            try:
+                pairs_file = Path("data/content_pairs.json")
+                if pairs_file.exists():
+                    pairs = json.loads(pairs_file.read_text(encoding='utf-8'))
+                else:
+                    pairs = []
+                return jsonify({'success': True, 'pairs': pairs})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/content-pairs', methods=['POST'])
+        def add_content_pair():
+            """Add a new content pair."""
+            try:
+                data = request.get_json()
+                caption_ids = data.get('caption_ids', [])  # Now accepts array
+                image_group_id = data.get('image_group_id')
+                account_username = data.get('account_username')
+                
+                # Support both single caption_id (backward compatibility) and multiple caption_ids
+                if 'caption_id' in data and not caption_ids:
+                    caption_ids = [data.get('caption_id')]
+                
+                pairs_file = Path("data/content_pairs.json")
+                if pairs_file.exists():
+                    pairs = json.loads(pairs_file.read_text(encoding='utf-8'))
+                else:
+                    pairs = []
+                
+                new_pair = {
+                    'id': int(time.time() * 1000),
+                    'caption_ids': caption_ids,  # Array of caption IDs
+                    'image_group_id': image_group_id,
+                    'account_username': account_username,
+                    'created_at': datetime.now().isoformat()
+                }
+                
+                pairs.append(new_pair)
+                pairs_file.write_text(json.dumps(pairs, indent=2), encoding='utf-8')
+                
+                caption_count = len(caption_ids) if caption_ids else 0
+                self.broadcast_log_entry(f"Content pair created for @{account_username} with {caption_count} caption(s)")
+                return jsonify({'success': True, 'message': 'Content pair created', 'pair': new_pair})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/content-pairs/<int:pair_id>', methods=['DELETE'])
+        def delete_content_pair(pair_id):
+            """Delete a content pair."""
+            try:
+                pairs_file = Path("data/content_pairs.json")
+                if not pairs_file.exists():
+                    return jsonify({'success': False, 'error': 'No pairs file'})
+                
+                pairs = json.loads(pairs_file.read_text(encoding='utf-8'))
+                pairs = [p for p in pairs if p['id'] != pair_id]
+                pairs_file.write_text(json.dumps(pairs, indent=2), encoding='utf-8')
+                
+                self.broadcast_log_entry("Content pair deleted")
+                return jsonify({'success': True, 'message': 'Content pair deleted'})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/content-pairs/<int:pair_id>', methods=['PUT'])
+        def update_content_pair(pair_id):
+            """Update a content pair."""
+            try:
+                data = request.get_json()
+                
+                pairs_file = Path("data/content_pairs.json")
+                if not pairs_file.exists():
+                    return jsonify({'success': False, 'error': 'No pairs file'})
+                
+                pairs = json.loads(pairs_file.read_text(encoding='utf-8'))
+                
+                for pair in pairs:
+                    if pair['id'] == pair_id:
+                        # Support both single caption_id and multiple caption_ids
+                        if 'caption_ids' in data:
+                            pair['caption_ids'] = data['caption_ids']
+                        elif 'caption_id' in data:
+                            # Backward compatibility: convert single to array
+                            pair['caption_ids'] = [data['caption_id']]
+                        
+                        if 'image_group_id' in data:
+                            pair['image_group_id'] = data['image_group_id']
+                        if 'account_username' in data:
+                            pair['account_username'] = data['account_username']
+                        pair['updated_at'] = datetime.now().isoformat()
+                        break
+                
+                pairs_file.write_text(json.dumps(pairs, indent=2), encoding='utf-8')
+                
+                self.broadcast_log_entry("Content pair updated")
+                return jsonify({'success': True, 'message': 'Content pair updated'})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
 
         @self.app.route('/api/image-groups', methods=['GET'])
         def get_image_groups():
@@ -1087,6 +1217,37 @@ class WebGUIServer:
                 groups = [g for g in groups if g['id'] != group_id]
                 img_file.write_text(json.dumps(groups, indent=2), encoding='utf-8')
                 return jsonify({'success': True, 'message': 'Image group deleted'})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/image-groups/<int:group_id>/images/<path:image_path>', methods=['DELETE'])
+        def delete_single_image(group_id, image_path):
+            """Delete a single image from a group."""
+            try:
+                img_file = Path("data/image_groups.json")
+                if not img_file.exists():
+                    return jsonify({'success': False, 'error': 'No image groups file'})
+                
+                groups = json.loads(img_file.read_text(encoding='utf-8'))
+                for group in groups:
+                    if group['id'] == group_id:
+                        # Remove the image from the group
+                        group['images'] = [img for img in group['images'] if img != image_path]
+                        break
+                
+                img_file.write_text(json.dumps(groups, indent=2), encoding='utf-8')
+                return jsonify({'success': True, 'message': 'Image deleted from group'})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/image-groups/delete-all', methods=['DELETE'])
+        def delete_all_image_groups():
+            """Delete all image groups."""
+            try:
+                img_file = Path("data/image_groups.json")
+                img_file.write_text(json.dumps([], indent=2), encoding='utf-8')
+                self.broadcast_log_entry("All image groups deleted")
+                return jsonify({'success': True, 'message': 'All image groups deleted'})
             except Exception as e:
                 return jsonify({'success': False, 'error': str(e)})
 

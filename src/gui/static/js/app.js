@@ -249,6 +249,7 @@ class XbotWebInterface {
                 this.loadCaptions();
                 this.loadImageGroups();
                 this.loadCommunities();
+                this.loadContentPairs();
                 break;
             case 'settings':
                 this.loadConfig();
@@ -434,17 +435,21 @@ class XbotWebInterface {
                 ? (account.proxy !== 'None' ? account.proxy : 'No proxy selected')
                 : 'Proxy disabled';
             const proxyClass = account.use_proxy && account.proxy !== 'None' ? 'proxy-enabled' : 'proxy-disabled';
+            const isActive = account.is_active !== false; // Default to true if not set
             
             return `
                 <div class="list-item">
                     <div class="item-info">
-                        <div class="item-title">@${account.username}</div>
+                        <div class="item-title">@${account.username} ${!isActive ? '<span style="color: #999;">(Inactive)</span>' : ''}</div>
                         <div class="item-subtitle">
                             <span class="${proxyClass}">🔗 ${proxyText}</span>
                         </div>
                     </div>
                     <div class="item-actions">
                         <span class="status-badge ${account.status}">${account.status}</span>
+                        <button class="btn btn-outline btn-sm" onclick="app.toggleAccount('${account.username}')" title="${isActive ? 'Deactivate' : 'Activate'} account">
+                            <i class="fas fa-toggle-${isActive ? 'on' : 'off'}"></i>
+                        </button>
                         <button class="btn btn-outline btn-sm" onclick="app.openAccountBrowser('${account.username}')" title="Open Browser">
                             <i class="fas fa-external-link-alt"></i>
                         </button>
@@ -1193,12 +1198,24 @@ class XbotWebInterface {
             container.innerHTML = `<div class="empty-state"><i class="fas fa-font"></i><p>No captions</p></div>`;
             return;
         }
-        container.innerHTML = captions.map(c => `
+        
+        // Add delete all button at the top
+        let html = `
+            <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
+                <button class="btn btn-danger btn-sm" onclick="app.deleteAllCaptions()" title="Delete all captions">
+                    <i class="fas fa-trash-alt"></i> Delete All
+                </button>
+            </div>
+        `;
+        
+        html += captions.map(c => `
             <div class="list-item" style="display:flex; justify-content:space-between; align-items:center;">
                 <div class="item-info">${c.content.substring(0, 50)}${c.content.length > 50 ? '...' : ''}</div>
                 <button class="btn btn-danger btn-sm" onclick="app.deleteCaption(${c.id})"><i class="fas fa-trash"></i></button>
             </div>
         `).join('');
+        
+        container.innerHTML = html;
     }
 
     async deleteCaption(id) {
@@ -1258,9 +1275,19 @@ class XbotWebInterface {
             container.innerHTML = `<div class="empty-state"><i class="fas fa-images"></i><p>No image groups</p></div>`;
             return;
         }
-        container.innerHTML = groups.map(g => {
+        
+        // Add delete all button at the top
+        let html = `
+            <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
+                <button class="btn btn-danger btn-sm" onclick="app.deleteAllImageGroups()" title="Delete all image groups">
+                    <i class="fas fa-trash-alt"></i> Delete All
+                </button>
+            </div>
+        `;
+        
+        html += groups.map(g => {
             const imgCount = g.images ? g.images.length : 0;
-            const imagesHtml = g.images ? g.images.map(imgPath => {
+            const imagesHtml = g.images ? g.images.slice(0, 5).map(imgPath => {
                 const filename = imgPath.split(/[\\/]/).pop();
                 return `<img src="/api/images/${filename}" style="width:30px;height:30px;object-fit:cover;border-radius:4px;margin-right:2px;display:inline-block;">`;
             }).join('') : '';
@@ -1268,12 +1295,14 @@ class XbotWebInterface {
             return `
             <div class="list-item" style="display:flex; justify-content:space-between; align-items:center;">
                 <div style="display:flex;align-items:center;gap:10px;">
-                    <div style="display:flex; flex-wrap:wrap; max-width: 150px;">${imagesHtml}</div>
+                    <div style="display:flex; flex-wrap:wrap; max-width: 180px;">${imagesHtml}${imgCount > 5 ? `<span style="font-size:0.8em;color:#666;">+${imgCount-5}</span>` : ''}</div>
                     <span style="font-size: 0.9em; color: #666;">${imgCount} images</span>
                 </div>
                 <button class="btn btn-danger btn-sm" onclick="app.deleteImageGroup(${g.id})"><i class="fas fa-trash"></i></button>
             </div>
         `}).join('');
+        
+        container.innerHTML = html;
     }
 
     async deleteImageGroup(id) {
@@ -1514,6 +1543,342 @@ class XbotWebInterface {
         } catch (error) {
             this.showToast('Failed to remove account', 'error');
             console.error('Failed to remove account:', error);
+        }
+    }
+    
+    async toggleAccount(username) {
+        try {
+            const response = await fetch(`/api/accounts/${username}/toggle`, { method: 'PUT' });
+            const data = await response.json();
+            
+            if (data.success) {
+                this.showToast(data.message, 'success');
+                this.loadAccounts();
+                this.addLogEntry(`Account @${username} ${data.is_active ? 'activated' : 'deactivated'}`);
+            } else {
+                this.showToast('Failed to toggle account: ' + data.error, 'error');
+            }
+        } catch (error) {
+            this.showToast('Failed to toggle account', 'error');
+            console.error('Failed to toggle account:', error);
+        }
+    }
+    
+    async deleteAllCaptions() {
+        if (!confirm('Delete ALL captions? This cannot be undone!')) return;
+        try {
+            const response = await fetch('/api/captions/delete-all', { method: 'DELETE' });
+            const data = await response.json();
+            if (data.success) {
+                this.showToast('All captions deleted', 'success');
+                this.loadCaptions();
+            }
+        } catch (error) {
+            this.showToast('Failed to delete all captions', 'error');
+        }
+    }
+    
+    async deleteAllImageGroups() {
+        if (!confirm('Delete ALL image groups? This cannot be undone!')) return;
+        try {
+            const response = await fetch('/api/image-groups/delete-all', { method: 'DELETE' });
+            const data = await response.json();
+            if (data.success) {
+                this.showToast('All image groups deleted', 'success');
+                this.loadImageGroups();
+            }
+        } catch (error) {
+            this.showToast('Failed to delete all image groups', 'error');
+        }
+    }
+    
+    // Content Pairing Management
+    async loadContentPairs() {
+        try {
+            const response = await fetch('/api/content-pairs');
+            const data = await response.json();
+            if (data.success) {
+                this.renderContentPairs(data.pairs);
+            }
+        } catch (error) {
+            console.error('Failed to load content pairs:', error);
+        }
+    }
+    
+    renderContentPairs(pairs) {
+        const container = document.getElementById('contentPairsList');
+        if (!container) return;
+        
+        if (!pairs || pairs.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-link"></i>
+                    <p>No content pairs created yet</p>
+                    <small>Click "Create Pair" to link caption(s), photo, and account together</small>
+                </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = pairs.map(pair => {
+            // Handle both old format (caption_id) and new format (caption_ids)
+            let captionDisplay = 'Not set';
+            if (pair.caption_ids && Array.isArray(pair.caption_ids)) {
+                captionDisplay = `${pair.caption_ids.length} caption(s)`;
+            } else if (pair.caption_id) {
+                captionDisplay = `Caption ID: ${pair.caption_id}`;
+            }
+            
+            return `
+            <div class="list-item" style="display:flex; justify-content:space-between; align-items:center; padding: 15px;">
+                <div class="item-info" style="flex: 1;">
+                    <div style="display: flex; gap: 20px; align-items: center;">
+                        <div style="flex: 1;">
+                            <strong>Account:</strong> @${pair.account_username || 'Not set'}
+                        </div>
+                        <div style="flex: 1;">
+                            <strong>Captions:</strong> ${captionDisplay}
+                        </div>
+                        <div style="flex: 1;">
+                            <strong>Image Group ID:</strong> ${pair.image_group_id || 'Not set'}
+                        </div>
+                    </div>
+                </div>
+                <div class="item-actions">
+                    <button class="btn btn-outline btn-sm" onclick="app.editContentPair(${pair.id})" title="Edit pair">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="app.deleteContentPair(${pair.id})" title="Delete pair">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        `}).join('');
+    }
+    
+    async showAddContentPairModal() {
+        // Load all necessary data first
+        const [captionsRes, imageGroupsRes, accountsRes] = await Promise.all([
+            fetch('/api/captions'),
+            fetch('/api/image-groups'),
+            fetch('/api/accounts')
+        ]);
+        
+        const captions = (await captionsRes.json()).captions || [];
+        const imageGroups = (await imageGroupsRes.json()).groups || [];
+        const accounts = (await accountsRes.json()).accounts || [];
+        
+        const captionOptions = captions.length > 0 
+            ? captions.map(c => 
+                `<option value="${c.id}">${c.content.substring(0, 50)}${c.content.length > 50 ? '...' : ''}</option>`
+              ).join('')
+            : '<option value="" disabled>No captions available</option>';
+        
+        const imageGroupOptions = imageGroups.length > 0
+            ? '<option value="">Select image group...</option>' + imageGroups.map(g => 
+                `<option value="${g.id}">Group ${g.id} (${g.images ? g.images.length : 0} images)</option>`
+              ).join('')
+            : '<option value="">No image groups available</option>';
+        
+        const accountOptions = accounts.length > 0
+            ? '<option value="">Select account...</option>' + accounts.map(a => 
+                `<option value="${a.username}">@${a.username}</option>`
+              ).join('')
+            : '<option value="">No accounts available</option>';
+        
+        this.showModal('Create Content Pair', `
+            <form id="addContentPairForm">
+                <div class="form-group">
+                    <label for="pairAccount">Account</label>
+                    <select id="pairAccount" class="form-control">
+                        ${accountOptions}
+                    </select>
+                    <small class="help-text">Select the account that will use this content</small>
+                </div>
+                <div class="form-group">
+                    <label for="pairCaptions">Captions (Multiple Selection)</label>
+                    <select id="pairCaptions" class="form-control" multiple size="6" style="height: auto;">
+                        ${captionOptions}
+                    </select>
+                    <small class="help-text">Hold Ctrl (Cmd on Mac) to select multiple captions. The bot will rotate through them.</small>
+                </div>
+                <div class="form-group">
+                    <label for="pairImageGroup">Image Group</label>
+                    <select id="pairImageGroup" class="form-control">
+                        ${imageGroupOptions}
+                    </select>
+                    <small class="help-text">Select the image group for this pair</small>
+                </div>
+            </form>
+        `, `
+            <button class="btn btn-outline" onclick="app.hideModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="app.addContentPairFromModal()">Create Pair</button>
+        `);
+    }
+    
+    async addContentPairFromModal() {
+        const account = document.getElementById('pairAccount').value;
+        const captionSelect = document.getElementById('pairCaptions');
+        const selectedCaptions = Array.from(captionSelect.selectedOptions).map(opt => parseInt(opt.value));
+        const imageGroup = document.getElementById('pairImageGroup').value;
+        
+        if (!account) {
+            this.showToast('Please select an account', 'warning');
+            return;
+        }
+        
+        if (selectedCaptions.length === 0) {
+            this.showToast('Please select at least one caption', 'warning');
+            return;
+        }
+        
+        if (!imageGroup) {
+            this.showToast('Please select an image group', 'warning');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/content-pairs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    account_username: account,
+                    caption_ids: selectedCaptions,
+                    image_group_id: parseInt(imageGroup)
+                })
+            });
+            
+            const data = await response.json();
+            if (data.success) {
+                this.showToast(`Content pair created with ${selectedCaptions.length} caption(s)`, 'success');
+                this.hideModal();
+                this.loadContentPairs();
+            } else {
+                this.showToast('Failed to create pair: ' + data.error, 'error');
+            }
+        } catch (error) {
+            this.showToast('Failed to create pair', 'error');
+            console.error('Failed to create pair:', error);
+        }
+    }
+    
+    async deleteContentPair(pairId) {
+        if (!confirm('Delete this content pair?')) return;
+        
+        try {
+            const response = await fetch(`/api/content-pairs/${pairId}`, { method: 'DELETE' });
+            const data = await response.json();
+            if (data.success) {
+                this.showToast('Content pair deleted', 'success');
+                this.loadContentPairs();
+            }
+        } catch (error) {
+            this.showToast('Failed to delete pair', 'error');
+        }
+    }
+    
+    async editContentPair(pairId) {
+        // Load current pair data and all options
+        const [pairRes, captionsRes, imageGroupsRes, accountsRes] = await Promise.all([
+            fetch('/api/content-pairs'),
+            fetch('/api/captions'),
+            fetch('/api/image-groups'),
+            fetch('/api/accounts')
+        ]);
+        
+        const pairs = (await pairRes.json()).pairs || [];
+        const pair = pairs.find(p => p.id === pairId);
+        
+        if (!pair) {
+            this.showToast('Pair not found', 'error');
+            return;
+        }
+        
+        const captions = (await captionsRes.json()).captions || [];
+        const imageGroups = (await imageGroupsRes.json()).groups || [];
+        const accounts = (await accountsRes.json()).accounts || [];
+        
+        // Handle both old format (caption_id) and new format (caption_ids)
+        let selectedCaptionIds = [];
+        if (pair.caption_ids && Array.isArray(pair.caption_ids)) {
+            selectedCaptionIds = pair.caption_ids;
+        } else if (pair.caption_id) {
+            selectedCaptionIds = [pair.caption_id];
+        }
+        
+        const captionOptions = captions.map(c => {
+            const isSelected = selectedCaptionIds.includes(c.id);
+            return `<option value="${c.id}" ${isSelected ? 'selected' : ''}>${c.content.substring(0, 50)}${c.content.length > 50 ? '...' : ''}</option>`;
+        }).join('');
+        
+        const imageGroupOptions = imageGroups.map(g => 
+            `<option value="${g.id}" ${g.id === pair.image_group_id ? 'selected' : ''}>Group ${g.id} (${g.images ? g.images.length : 0} images)</option>`
+        ).join('');
+        
+        const accountOptions = accounts.map(a => 
+            `<option value="${a.username}" ${a.username === pair.account_username ? 'selected' : ''}>@${a.username}</option>`
+        ).join('');
+        
+        this.showModal('Edit Content Pair', `
+            <form id="editContentPairForm">
+                <div class="form-group">
+                    <label for="editPairAccount">Account</label>
+                    <select id="editPairAccount" class="form-control">
+                        ${accountOptions}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="editPairCaptions">Captions (Multiple Selection)</label>
+                    <select id="editPairCaptions" class="form-control" multiple size="6" style="height: auto;">
+                        ${captionOptions}
+                    </select>
+                    <small class="help-text">Hold Ctrl (Cmd on Mac) to select multiple captions. Currently selected: ${selectedCaptionIds.length}</small>
+                </div>
+                <div class="form-group">
+                    <label for="editPairImageGroup">Image Group</label>
+                    <select id="editPairImageGroup" class="form-control">
+                        ${imageGroupOptions}
+                    </select>
+                </div>
+            </form>
+        `, `
+            <button class="btn btn-outline" onclick="app.hideModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="app.updateContentPairFromModal(${pairId})">Update Pair</button>
+        `);
+    }
+    
+    async updateContentPairFromModal(pairId) {
+        const account = document.getElementById('editPairAccount').value;
+        const captionSelect = document.getElementById('editPairCaptions');
+        const selectedCaptions = Array.from(captionSelect.selectedOptions).map(opt => parseInt(opt.value));
+        const imageGroup = document.getElementById('editPairImageGroup').value;
+        
+        if (selectedCaptions.length === 0) {
+            this.showToast('Please select at least one caption', 'warning');
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/content-pairs/${pairId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    account_username: account,
+                    caption_ids: selectedCaptions,
+                    image_group_id: parseInt(imageGroup)
+                })
+            });
+            
+            const data = await response.json();
+            if (data.success) {
+                this.showToast(`Content pair updated with ${selectedCaptions.length} caption(s)`, 'success');
+                this.hideModal();
+                this.loadContentPairs();
+            } else {
+                this.showToast('Failed to update pair: ' + data.error, 'error');
+            }
+        } catch (error) {
+            this.showToast('Failed to update pair', 'error');
         }
     }
     

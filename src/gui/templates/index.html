@@ -243,6 +243,28 @@
                     </div>
                 </div>
                 
+                <div class="card" style="margin-top: 20px;">
+                    <div class="card-header">
+                        <h3>Content Pairing</h3>
+                        <button id="addContentPair" class="btn btn-primary" onclick="app.showAddContentPairModal()">
+                            <i class="fas fa-link"></i> Create Pair
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <p class="help-text">
+                            <i class="fas fa-info-circle"></i> 
+                            Pair specific captions (multiple allowed), photos, and accounts together. When posting, the bot will rotate through the paired captions.
+                        </p>
+                        <div id="contentPairsList" class="content-pairs-list">
+                            <div class="empty-state">
+                                <i class="fas fa-link"></i>
+                                <p>No content pairs created yet</p>
+                                <small>Click "Create Pair" to link caption(s), photo, and account together</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
                 <div class="card">
                     <div class="card-header">
                         <h3>Communities</h3>

@@ -317,6 +317,25 @@ class AccountManager:
             self.logger.error(f"Failed to update proxy for {username}: {e}")
             return False
     
+    def toggle_account_status(self, username: str) -> bool:
+        """Toggle account active/inactive status."""
+        try:
+            if username not in self.accounts:
+                return False
+            
+            account = self.accounts[username]
+            account.is_active = not account.is_active
+            
+            self.save_accounts()
+            
+            status = "activated" if account.is_active else "deactivated"
+            self.logger.info(f"Account {username} {status}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to toggle status for {username}: {e}")
+            return False
+    
     def cleanup_orphaned_browser_profiles(self) -> int:
         """
         Clean up browser profile directories for accounts that no longer exist.
@@ -476,15 +495,15 @@ class AccountManager:
             self.logger.error(f"Failed to test account login for {username}: {e}")
             return False
     
-    async def open_account_browser(self, username: str) -> bool:
+    async def open_account_browser(self, username: str, allow_multiple: bool = False) -> bool:
         """Open a browser session for an existing account."""
         try:
             if username not in self.accounts:
                 self.logger.error(f"Account {username} not found")
                 return False
             
-            # Check if already active
-            if username in self.active_sessions:
+            # Check if already active (only if not allowing multiple)
+            if not allow_multiple and username in self.active_sessions:
                 self.logger.warning(f"Browser session already active for {username}")
                 return True
             
@@ -531,15 +550,22 @@ class AccountManager:
                 self.logger.warning(f"No cookies found for {username}, user may need to login")
                 await browser.navigate_to_url("https://x.com/i/flow/login")
             
-            # Store the active session
-            self.active_sessions[username] = {
+            # Store the active session (with unique key if allowing multiple)
+            if allow_multiple:
+                # Use timestamp to create unique session key
+                import time
+                session_key = f"{username}_{int(time.time() * 1000)}"
+            else:
+                session_key = username
+            
+            self.active_sessions[session_key] = {
                 'account': account,
                 'browser': browser,
                 'type': 'manual_browser'  # Distinguish from login session
             }
             
             # Start background task to monitor browser close and save cookies
-            asyncio.create_task(self._monitor_browser_and_save_cookies(username))
+            asyncio.create_task(self._monitor_browser_and_save_cookies(session_key, username))
             
             self.logger.info(f"Browser opened for account: {username}")
             return True
@@ -682,19 +708,23 @@ class AccountManager:
         except Exception as e:
             self.logger.error(f"Error cancelling login session for {username}: {e}")
             return False
-    async def _monitor_browser_and_save_cookies(self, username: str) -> None:
+    async def _monitor_browser_and_save_cookies(self, session_key: str, username: str = None) -> None:
         """Monitor browser session and save cookies when it closes or periodically."""
         try:
-            if username not in self.active_sessions:
+            # If username not provided, extract from session_key
+            if username is None:
+                username = session_key.split('_')[0] if '_' in session_key else session_key
+            
+            if session_key not in self.active_sessions:
                 return
                 
-            session = self.active_sessions[username]
+            session = self.active_sessions[session_key]
             browser = session['browser']
             account = session['account']
             
-            self.logger.info(f"Started cookie monitor for {username}")
+            self.logger.info(f"Started cookie monitor for {username} (session: {session_key})")
             
-            while username in self.active_sessions:
+            while session_key in self.active_sessions:
                 try:
                     # Check if browser is still alive
                     if not await browser.is_browser_alive():
@@ -724,8 +754,8 @@ class AccountManager:
                 pass
                 
             # Cleanup session from active sessions if we detected it closed
-            if username in self.active_sessions:
-                del self.active_sessions[username]
+            if session_key in self.active_sessions:
+                del self.active_sessions[session_key]
                 self.logger.info(f"Cleaned up session and saved final cookies for {username}")
                 
         except Exception as e:
