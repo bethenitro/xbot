@@ -48,25 +48,32 @@ class QueueManager:
             self.logger.error(f"Failed to reload posts: {e}")
             return False
     
-    def get_next_post(self, community_group: str) -> Optional[Post]:
+    def get_next_post(self, community_group: str, account_username: str = None) -> Optional[Post]:
         """
-        Get next post for a specific community group.
-        Prioritizes random generation from Library (Captions + Images).
+        Get next post for a specific community group and optionally an account.
+        Prioritizes content pairing, then random generation from Library.
         Fallback to static posts.
         
         Args:
             community_group: Name of the community group
+            account_username: Optional account username for content pairing filtering
             
         Returns:
             Next available post for the group, None if no posts available
         """
         try:
-            # 1. Try to generate a random post from Library
+            # 1. Try to get post from content pairing first
+            if account_username:
+                paired_post = self._generate_post_from_pairing(community_group, account_username)
+                if paired_post:
+                    return paired_post
+            
+            # 2. Try to generate a random post from Library
             dynamic_post = self._generate_dynamic_post(community_group)
             if dynamic_post:
                 return dynamic_post
 
-            # 2. Fallback to static posts
+            # 3. Fallback to static posts
             # Find pending posts for this community group
             available_posts = [
                 post for post in self.posts
@@ -88,6 +95,107 @@ class QueueManager:
         except Exception as e:
             self.logger.error(f"Failed to get next post for {community_group}: {e}")
             return None
+    
+    def _generate_post_from_pairing(self, community_group: str, account_username: str) -> Optional[Post]:
+        """Generate a post from content pairing configuration."""
+        try:
+            # Load content pairing
+            pairing_file = Path("data/content_pairing.json")
+            if not pairing_file.exists():
+                return None
+            
+            pairings = json.loads(pairing_file.read_text(encoding='utf-8'))
+            if not pairings:
+                return None
+            
+            # Find pairings that match this account and community
+            matching_pairings = []
+            for pairing in pairings:
+                accounts = pairing.get('accounts', [])
+                communities = pairing.get('communities', [])
+                
+                # Check if this pairing applies to this account and community
+                account_matches = account_username in accounts
+                community_matches = not communities or community_group in communities
+                
+                if account_matches and community_matches:
+                    matching_pairings.append(pairing)
+            
+            if not matching_pairings:
+                return None
+            
+            # Pick a random matching pairing
+            pairing = random.choice(matching_pairings)
+            
+            # Get caption IDs from pairing
+            caption_ids = pairing.get('caption_ids', [])
+            if not caption_ids:
+                return None
+            
+            # Load captions
+            captions_file = Path("data/captions.json")
+            if not captions_file.exists():
+                return None
+            
+            all_captions = json.loads(captions_file.read_text(encoding='utf-8'))
+            
+            # Filter to only captions in this pairing
+            paired_captions = [c for c in all_captions if c.get('id') in caption_ids]
+            if not paired_captions:
+                return None
+            
+            # Pick random caption from pairing
+            caption_obj = random.choice(paired_captions)
+            content = caption_obj['content']
+            
+            # Get image groups from pairing (overrides caption's image_groups)
+            pairing_image_groups = pairing.get('image_groups', [])
+            images = []
+            
+            if pairing_image_groups:
+                # Use pairing's image groups
+                try:
+                    img_file = Path("data/image_groups.json")
+                    if img_file.exists():
+                        all_groups = json.loads(img_file.read_text(encoding='utf-8'))
+                        
+                        # Filter to only the groups specified in pairing
+                        filtered_groups = [
+                            group for group in all_groups
+                            if group.get('name') in pairing_image_groups
+                        ]
+                        
+                        if filtered_groups:
+                            group = random.choice(filtered_groups)
+                            all_images = group['images']
+                            selected_image = random.choice(all_images)
+                            images = [selected_image]
+                            self.logger.debug(f"Selected image from pairing: {selected_image}")
+                except Exception as img_error:
+                    self.logger.warning(f"Could not load images from pairing: {img_error}")
+                    images = []
+            
+            # Create a Post object
+            post_id = f"paired_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:6]}"
+            post = Post(
+                id=post_id,
+                content=content,
+                images=images,
+                community_groups=[community_group],
+                status=PostStatus.PENDING,
+                created_at=datetime.now()
+            )
+            
+            if images:
+                self.logger.info(f"Generated paired post {post_id} with 1 image for @{account_username}")
+            else:
+                self.logger.info(f"Generated paired text-only post {post_id} for @{account_username}")
+            
+            return post
+            
+        except Exception as e:
+            self.logger.error(f"Error generating post from pairing: {e}")
+            return None
 
     def _generate_dynamic_post(self, community_group: str) -> Optional[Post]:
         """Generate a random post from Captions and Images library."""
@@ -100,31 +208,41 @@ class QueueManager:
             captions_data = json.loads(captions_file.read_text(encoding='utf-8'))
             if not captions_data:
                 return None
-
-            # Load image groups - OPTIONAL (images are no longer required)
-            images = []  # Default to empty list (text-only post)
-            img_file = Path("data/image_groups.json")
-            if img_file.exists():
-                try:
-                    groups = json.loads(img_file.read_text(encoding='utf-8'))
-                    if groups:
-                        # Pick random image group and select only ONE image from it
-                        group = random.choice(groups)
-                        all_images = group['images']
-                        
-                        # Select only one random image from the group
-                        selected_image = random.choice(all_images)
-                        images = [selected_image]  # Single image in list
-                        self.logger.debug(f"Selected image: {selected_image}")
-                except Exception as img_error:
-                    self.logger.warning(f"Could not load images, creating text-only post: {img_error}")
-                    images = []
-            else:
-                self.logger.info("No image_groups.json found, creating text-only post")
-                
+            
             # Pick random caption
             caption_obj = random.choice(captions_data)
             content = caption_obj['content']
+            
+            # Check if caption specifies image groups
+            images = []  # Default to empty list (text-only post)
+            caption_image_groups = caption_obj.get('image_groups', [])
+            
+            if caption_image_groups:
+                # Use caption-specific image groups
+                try:
+                    # Load all image groups
+                    img_file = Path("data/image_groups.json")
+                    if img_file.exists():
+                        all_groups = json.loads(img_file.read_text(encoding='utf-8'))
+                        
+                        # Filter to only the groups specified in caption
+                        filtered_groups = [
+                            group for group in all_groups
+                            if group.get('name') in caption_image_groups
+                        ]
+                        
+                        if filtered_groups:
+                            # Pick random group from filtered list
+                            group = random.choice(filtered_groups)
+                            all_images = group['images']
+                            
+                            # Select only one random image from the group
+                            selected_image = random.choice(all_images)
+                            images = [selected_image]
+                            self.logger.debug(f"Selected image: {selected_image}")
+                except Exception as img_error:
+                    self.logger.warning(f"Could not load images, creating text-only post: {img_error}")
+                    images = []
             
             # Create a Post object
             post_id = f"dynamic_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:6]}"
@@ -138,7 +256,7 @@ class QueueManager:
             )
             
             if images:
-                self.logger.info(f"Generated dynamic post {post_id} with 1 image: {images[0]}")
+                self.logger.info(f"Generated dynamic post {post_id} with 1 image")
             else:
                 self.logger.info(f"Generated dynamic text-only post {post_id}")
             

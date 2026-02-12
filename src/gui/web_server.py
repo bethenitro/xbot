@@ -907,6 +907,8 @@ class WebGUIServer:
             try:
                 data = request.get_json()
                 content = data.get('content', '').strip()
+                image_groups = data.get('image_groups', [])
+                
                 if not content:
                     return jsonify({'success': False, 'error': 'Content required'})
                 
@@ -926,7 +928,8 @@ class WebGUIServer:
                 new_caption = {
                     'id': int(time.time() * 1000),
                     'content': content,
-                    'created_at': datetime.now().isoformat()
+                    'created_at': datetime.now().isoformat(),
+                    'image_groups': image_groups
                 }
                 captions.append(new_caption)
                 captions_file.write_text(json.dumps(captions, indent=2), encoding='utf-8')
@@ -947,6 +950,29 @@ class WebGUIServer:
                 captions = [c for c in captions if c['id'] != caption_id]
                 captions_file.write_text(json.dumps(captions, indent=2), encoding='utf-8')
                 return jsonify({'success': True, 'message': 'Caption deleted'})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/captions/<int:caption_id>', methods=['PUT'])
+        def update_caption(caption_id):
+            """Update caption."""
+            try:
+                data = request.get_json()
+                captions_file = Path("data/captions.json")
+                if not captions_file.exists():
+                    return jsonify({'success': False, 'error': 'No captions file'})
+                
+                captions = json.loads(captions_file.read_text(encoding='utf-8'))
+                for caption in captions:
+                    if caption['id'] == caption_id:
+                        if 'content' in data:
+                            caption['content'] = data['content']
+                        if 'image_groups' in data:
+                            caption['image_groups'] = data['image_groups']
+                        break
+                
+                captions_file.write_text(json.dumps(captions, indent=2), encoding='utf-8')
+                return jsonify({'success': True, 'message': 'Caption updated'})
             except Exception as e:
                 return jsonify({'success': False, 'error': str(e)})
         
@@ -1060,6 +1086,109 @@ class WebGUIServer:
                 
                 self.broadcast_log_entry("Content pair updated")
                 return jsonify({'success': True, 'message': 'Content pair updated'})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+        
+        # Account-Community Pairing API (Unified Content Pairing)
+        @self.app.route('/api/content-pairing', methods=['GET'])
+        def get_content_pairing():
+            """Get unified content pairing configuration."""
+            try:
+                pairing_file = Path("data/content_pairing.json")
+                if pairing_file.exists():
+                    pairing = json.loads(pairing_file.read_text(encoding='utf-8'))
+                else:
+                    pairing = []
+                return jsonify({'success': True, 'pairing': pairing})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/content-pairing', methods=['POST'])
+        def add_content_pairing():
+            """Add unified content pairing (captions + accounts + communities + image groups)."""
+            try:
+                data = request.get_json()
+                name = data.get('name', '')
+                caption_ids = data.get('caption_ids', [])
+                accounts = data.get('accounts', [])
+                communities = data.get('communities', [])
+                image_groups = data.get('image_groups', [])
+                
+                if not name:
+                    return jsonify({'success': False, 'error': 'Name is required'})
+                
+                pairing_file = Path("data/content_pairing.json")
+                if pairing_file.exists():
+                    pairing = json.loads(pairing_file.read_text(encoding='utf-8'))
+                else:
+                    pairing = []
+                
+                new_pairing = {
+                    'id': int(time.time() * 1000),
+                    'name': name,
+                    'caption_ids': caption_ids,
+                    'accounts': accounts,
+                    'communities': communities,
+                    'image_groups': image_groups,
+                    'created_at': datetime.now().isoformat()
+                }
+                
+                pairing.append(new_pairing)
+                pairing_file.write_text(json.dumps(pairing, indent=2), encoding='utf-8')
+                
+                self.broadcast_log_entry(f"Content pairing '{name}' created")
+                return jsonify({'success': True, 'message': 'Content pairing saved', 'pairing': new_pairing})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/content-pairing/<int:pairing_id>', methods=['PUT'])
+        def update_content_pairing(pairing_id):
+            """Update unified content pairing."""
+            try:
+                data = request.get_json()
+                
+                pairing_file = Path("data/content_pairing.json")
+                if not pairing_file.exists():
+                    return jsonify({'success': False, 'error': 'No pairing file'})
+                
+                pairing = json.loads(pairing_file.read_text(encoding='utf-8'))
+                
+                for item in pairing:
+                    if item.get('id') == pairing_id:
+                        if 'name' in data:
+                            item['name'] = data['name']
+                        if 'caption_ids' in data:
+                            item['caption_ids'] = data['caption_ids']
+                        if 'accounts' in data:
+                            item['accounts'] = data['accounts']
+                        if 'communities' in data:
+                            item['communities'] = data['communities']
+                        if 'image_groups' in data:
+                            item['image_groups'] = data['image_groups']
+                        item['updated_at'] = datetime.now().isoformat()
+                        break
+                
+                pairing_file.write_text(json.dumps(pairing, indent=2), encoding='utf-8')
+                
+                self.broadcast_log_entry(f"Content pairing updated")
+                return jsonify({'success': True, 'message': 'Content pairing updated'})
+            except Exception as e:
+                return jsonify({'success': False, 'error': str(e)})
+        
+        @self.app.route('/api/content-pairing/<int:pairing_id>', methods=['DELETE'])
+        def delete_content_pairing(pairing_id):
+            """Delete unified content pairing."""
+            try:
+                pairing_file = Path("data/content_pairing.json")
+                if not pairing_file.exists():
+                    return jsonify({'success': False, 'error': 'No pairing file'})
+                
+                pairing = json.loads(pairing_file.read_text(encoding='utf-8'))
+                pairing = [p for p in pairing if p.get('id') != pairing_id]
+                pairing_file.write_text(json.dumps(pairing, indent=2), encoding='utf-8')
+                
+                self.broadcast_log_entry(f"Content pairing deleted")
+                return jsonify({'success': True, 'message': 'Content pairing deleted'})
             except Exception as e:
                 return jsonify({'success': False, 'error': str(e)})
 

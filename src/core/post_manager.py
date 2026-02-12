@@ -7,7 +7,8 @@ import logging
 import time
 import threading
 import asyncio
-from typing import Dict, Any, Optional, Callable
+import json
+from typing import Dict, Any, Optional, Callable, List
 from datetime import datetime
 from pathlib import Path
 
@@ -745,6 +746,9 @@ class PostManager:
             
             self.logger.info(f"⚡ CONCURRENCY: Using {max_concurrent} concurrent browser{'s' if max_concurrent > 1 else ''}")
 
+            # Load content pairing configuration
+            content_pairing = self._load_content_pairing()
+            
             # DISTRIBUTED MODE: 1 post per account per batch, distributed across communities
             self.logger.info(f"🔄 Account Distribution Mode: distributing accounts across communities to avoid pattern detection")
             
@@ -767,13 +771,31 @@ class PostManager:
             # We use the STABLE list to determine the "next community" for each account
             # This guarantees that Account A cycles C0->C1->C2 regardless of execution order
             account_community_map = {}
+            account_post_map = {}  # NEW: Store post per account
+            
             for idx, account in enumerate(self.active_accounts_list):
-                 # Offset by global index AND account index to distribute them
-                 # Account 0 gets (Base + 0) % N
-                 # Account 1 gets (Base + 1) % N
-                 assigned_community_index = (base_community_index + idx) % num_communities
-                 community_url = self.community_list[assigned_community_index]
-                 account_community_map[account.username] = community_url
+                # Check if account has specific communities in content_pairing
+                account_communities = self._get_account_communities(account.username, content_pairing)
+                
+                if account_communities:
+                    # Use only the communities specified for this account
+                    account_community_index = (base_community_index + idx) % len(account_communities)
+                    community_url = account_communities[account_community_index]
+                    self.logger.info(f"📌 Account @{account.username} restricted to {len(account_communities)} specific communities")
+                else:
+                    # Use all communities (default behavior)
+                    assigned_community_index = (base_community_index + idx) % num_communities
+                    community_url = self.community_list[assigned_community_index]
+                
+                account_community_map[account.username] = community_url
+                
+                # Generate post for this specific account and community
+                account_post = self.queue_manager.get_next_post(group_name, account.username)
+                if account_post:
+                    account_post_map[account.username] = account_post
+                else:
+                    # Fallback to the shared post if no account-specific post
+                    account_post_map[account.username] = post
 
             # Create all posting tasks (Randomized Execution Order)
             all_tasks = []
@@ -789,6 +811,9 @@ class PostManager:
                  community_url = account_community_map[account.username]
                  community_short = community_url.split('/')[-1]
                  
+                 # Get account-specific post
+                 account_post = account_post_map.get(account.username, post)
+                 
                  self.logger.info(f"📋 Plan: @{account.username} -> {community_short}")
                  
                  task_info = {
@@ -796,9 +821,9 @@ class PostManager:
                     'community_url': community_url,
                     'community_short': community_short,
                     'post_number': post_number,
-                    'total_posts': total_posts, # Correct total is 1 per account now
-                    'content': post.content,
-                    'image_paths': post.images
+                    'total_posts': total_posts,
+                    'content': account_post.content,
+                    'image_paths': account_post.images
                 }
                  all_tasks.append(task_info)
                  
@@ -1775,6 +1800,52 @@ class PostManager:
             
         except Exception as e:
             self.logger.error(f"Failed to load accounts list: {e}")
+    
+    def _load_content_pairing(self) -> List[Dict[str, Any]]:
+        """Load unified content pairing configuration from file."""
+        try:
+            pairing_file = Path("data/content_pairing.json")
+            if not pairing_file.exists():
+                self.logger.debug("No content_pairing.json found, using default behavior")
+                return []
+            
+            with open(pairing_file, 'r', encoding='utf-8') as f:
+                pairing_data = json.load(f)
+            
+            self.logger.info(f"✅ Loaded {len(pairing_data)} content pairings")
+            return pairing_data
+            
+        except Exception as e:
+            self.logger.error(f"Failed to load content pairing: {e}")
+            return []
+    
+    def _get_account_communities(self, username: str, content_pairing: List[Dict[str, Any]]) -> List[str]:
+        """Get specific communities for an account from unified content pairing."""
+        try:
+            # Find all pairings that include this account
+            account_communities = []
+            for pairing in content_pairing:
+                accounts = pairing.get('accounts', [])
+                if username in accounts:
+                    communities = pairing.get('communities', [])
+                    if communities:
+                        account_communities.extend(communities)
+            
+            # Remove duplicates while preserving order
+            if account_communities:
+                seen = set()
+                unique_communities = []
+                for comm in account_communities:
+                    if comm not in seen:
+                        seen.add(comm)
+                        unique_communities.append(comm)
+                self.logger.debug(f"Account @{username} has {len(unique_communities)} specific communities from content pairing")
+                return unique_communities
+            
+            return []
+        except Exception as e:
+            self.logger.error(f"Failed to get account communities: {e}")
+            return []
     
     def reload_communities(self) -> bool:
         """

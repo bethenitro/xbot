@@ -249,7 +249,7 @@ class XbotWebInterface {
                 this.loadCaptions();
                 this.loadImageGroups();
                 this.loadCommunities();
-                this.loadContentPairs();
+                this.loadUnifiedContentPairing();
                 break;
             case 'settings':
                 this.loadConfig();
