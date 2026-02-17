@@ -3,8 +3,11 @@
  * Handles captions + accounts + communities + image groups pairing
  */
 
-// Add methods to XbotWebInterface prototype
-Object.assign(XbotWebInterface.prototype, {
+// Wait for DOM and app to be ready
+document.addEventListener('DOMContentLoaded', () => {
+    // Add methods to XbotWebInterface prototype after app is created
+    if (typeof XbotWebInterface !== 'undefined') {
+        Object.assign(XbotWebInterface.prototype, {
     // Unified Content Pairing Management
     async loadUnifiedContentPairing() {
         try {
@@ -94,13 +97,8 @@ Object.assign(XbotWebInterface.prototype, {
         const accounts = (await accountsRes.json()).accounts || [];
         const communitiesData = (await communitiesRes.json()).communities || [];
         
-        // Extract all community URLs
-        const allCommunities = [];
-        communitiesData.forEach(group => {
-            if (group.communities && Array.isArray(group.communities)) {
-                allCommunities.push(...group.communities);
-            }
-        });
+        // Extract all community URLs from the flat array
+        const allCommunities = communitiesData.map(c => c.url).filter(url => url);
         
         const captionOptions = captions.length > 0 
             ? captions.map(c => 
@@ -250,13 +248,8 @@ Object.assign(XbotWebInterface.prototype, {
         const accounts = (await accountsRes.json()).accounts || [];
         const communitiesData = (await communitiesRes.json()).communities || [];
         
-        // Extract all community URLs
-        const allCommunities = [];
-        communitiesData.forEach(group => {
-            if (group.communities && Array.isArray(group.communities)) {
-                allCommunities.push(...group.communities);
-            }
-        });
+        // Extract all community URLs from the flat array
+        const allCommunities = communitiesData.map(c => c.url).filter(url => url);
         
         const selectedCaptionIds = pairing.caption_ids || [];
         const selectedAccounts = pairing.accounts || [];
@@ -396,5 +389,9 @@ Object.assign(XbotWebInterface.prototype, {
         } catch (error) {
             this.showToast('Failed to delete pairing', 'error');
         }
+    }
+        });
+    } else {
+        console.error('XbotWebInterface not found - unified content pairing methods not loaded');
     }
 });

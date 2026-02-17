@@ -211,20 +211,13 @@ class PostManager:
             
             group_name = next_group_info['name']
             
-            # Get next post for this group
-            next_post = self.queue_manager.get_next_post(group_name)
-            if not next_post:
-                self.logger.debug(f"No available posts for group: {group_name}")
-                return False
-            
-            # MULTI-ACCOUNT STRATEGY: Every account posts to every community
+            # MULTI-ACCOUNT STRATEGY: Posts are generated per account in the posting loop
             # Note: This synchronous version is mainly for manual testing
             # The main automated posting uses the async version
-            success = self._execute_multi_account_posting_sync(next_post, group_name)
+            success = self._execute_multi_account_posting_sync(None, group_name)
             
             if success:
-                # Mark post as completed and update schedule
-                self.queue_manager.mark_post_completed(next_post.id, group_name)
+                # Update schedule
                 self.posting_scheduler.schedule_next_post(group_name)
                 self.error_handler.reset_failure_count()
                 
@@ -688,25 +681,18 @@ class PostManager:
             
             group_name = next_group_info['name']
             
-            # Get next post for this group
-            next_post = self.queue_manager.get_next_post(group_name)
-            if not next_post:
-                self.logger.debug(f"No available posts for group: {group_name}")
-                return False
-            
-            # MULTI-ACCOUNT STRATEGY: Every account posts to every community
-            success = await self._execute_multi_account_posting(next_post, group_name)
+            # MULTI-ACCOUNT STRATEGY: Posts are generated per account in the posting loop
+            success = await self._execute_multi_account_posting(None, group_name)
             
             if success:
-                # Mark post as completed and update schedule
-                self.queue_manager.mark_post_completed(next_post.id, group_name)
+                # Update schedule
                 self.posting_scheduler.schedule_next_post(group_name)
                 self.error_handler.reset_failure_count()
                 
-                self.logger.info(f"✅ Successfully completed multi-account posting for post: {next_post.id}")
+                self.logger.info(f"✅ Successfully completed multi-account posting")
             else:
                 # Handle posting failure
-                self._handle_posting_failure(next_post, group_name)
+                self.logger.warning(f"❌ Multi-account posting failed")
             
             return success
             
@@ -718,7 +704,7 @@ class PostManager:
             self.error_handler.handle_error(e, context)
             return False
     
-    async def _execute_multi_account_posting(self, post: Post, group_name: str) -> bool:
+    async def _execute_multi_account_posting(self, post: Optional[Post], group_name: str) -> bool:
         """
         CONFIGURABLE CONCURRENT BROWSERS: Execute multi-account posting with configurable concurrency.
         
@@ -771,7 +757,7 @@ class PostManager:
             # We use the STABLE list to determine the "next community" for each account
             # This guarantees that Account A cycles C0->C1->C2 regardless of execution order
             account_community_map = {}
-            account_post_map = {}  # NEW: Store post per account
+            account_post_map = {}  # Store post per account
             
             for idx, account in enumerate(self.active_accounts_list):
                 # Check if account has specific communities in content_pairing
@@ -794,8 +780,9 @@ class PostManager:
                 if account_post:
                     account_post_map[account.username] = account_post
                 else:
-                    # Fallback to the shared post if no account-specific post
-                    account_post_map[account.username] = post
+                    # No post available for this account - skip it
+                    self.logger.warning(f"No content pairing available for @{account.username}, skipping")
+                    account_post_map[account.username] = None
 
             # Create all posting tasks (Randomized Execution Order)
             all_tasks = []
@@ -812,7 +799,12 @@ class PostManager:
                  community_short = community_url.split('/')[-1]
                  
                  # Get account-specific post
-                 account_post = account_post_map.get(account.username, post)
+                 account_post = account_post_map.get(account.username)
+                 
+                 # Skip if no post available for this account
+                 if not account_post:
+                     self.logger.warning(f"⏭️  Skipping @{account.username} - no content pairing available")
+                     continue
                  
                  self.logger.info(f"📋 Plan: @{account.username} -> {community_short}")
                  

@@ -266,6 +266,17 @@ class XbotWebInterface {
         await this.loadImageGroups();
     }
     
+    // Stub methods for unified content pairing (will be overridden by unified-content-pairing.js)
+    async loadUnifiedContentPairing() {
+        console.log('Loading unified content pairing...');
+        // This will be overridden by unified-content-pairing.js
+    }
+    
+    async showAddUnifiedContentPairingModal() {
+        console.log('Opening unified content pairing modal...');
+        // This will be overridden by unified-content-pairing.js
+    }
+    
     async editFile(filename) {
         try {
             // Get file content

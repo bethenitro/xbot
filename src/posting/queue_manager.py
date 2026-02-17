@@ -51,8 +51,7 @@ class QueueManager:
     def get_next_post(self, community_group: str, account_username: str = None) -> Optional[Post]:
         """
         Get next post for a specific community group and optionally an account.
-        Prioritizes content pairing, then random generation from Library.
-        Fallback to static posts.
+        ONLY uses content pairing - no fallback to dynamic or static posts.
         
         Args:
             community_group: Name of the community group
@@ -62,35 +61,18 @@ class QueueManager:
             Next available post for the group, None if no posts available
         """
         try:
-            # 1. Try to get post from content pairing first
+            # ONLY try to get post from content pairing
             if account_username:
                 paired_post = self._generate_post_from_pairing(community_group, account_username)
                 if paired_post:
                     return paired_post
+                else:
+                    self.logger.warning(f"No content pairing found for @{account_username} in {community_group}")
+                    return None
             
-            # 2. Try to generate a random post from Library
-            dynamic_post = self._generate_dynamic_post(community_group)
-            if dynamic_post:
-                return dynamic_post
-
-            # 3. Fallback to static posts
-            # Find pending posts for this community group
-            available_posts = [
-                post for post in self.posts
-                if (post.status == PostStatus.PENDING and
-                    community_group in post.community_groups and
-                    post.is_ready_to_post())
-            ]
-            
-            if not available_posts:
-                self.logger.debug(f"No available posts for community group: {community_group}")
-                return None
-            
-            # Return the oldest post (FIFO)
-            next_post = min(available_posts, key=lambda p: p.created_at)
-            
-            self.logger.info(f"Selected next post for {community_group}: {next_post.id}")
-            return next_post
+            # If no account specified, cannot use pairing
+            self.logger.warning(f"No account specified - content pairing requires account context")
+            return None
             
         except Exception as e:
             self.logger.error(f"Failed to get next post for {community_group}: {e}")
@@ -102,39 +84,64 @@ class QueueManager:
             # Load content pairing
             pairing_file = Path("data/content_pairing.json")
             if not pairing_file.exists():
+                self.logger.debug("No content_pairing.json found")
                 return None
             
             pairings = json.loads(pairing_file.read_text(encoding='utf-8'))
             if not pairings:
+                self.logger.debug("No content pairings configured")
                 return None
             
-            # Find pairings that match this account and community
+            # Load communities to get all URLs for this group
+            communities_file = Path("data/communities.json")
+            all_community_urls = []
+            if communities_file.exists():
+                communities_data = json.loads(communities_file.read_text(encoding='utf-8'))
+                all_community_urls = [c.get('url') for c in communities_data if c.get('url')]
+            
+            # Find pairings that match this account
             matching_pairings = []
             for pairing in pairings:
                 accounts = pairing.get('accounts', [])
                 communities = pairing.get('communities', [])
                 
-                # Check if this pairing applies to this account and community
+                # Check if this pairing applies to this account
                 account_matches = account_username in accounts
-                community_matches = not communities or community_group in communities
                 
-                if account_matches and community_matches:
+                if not account_matches:
+                    continue
+                
+                # Check if this pairing applies to any community
+                # Empty communities list means "all communities"
+                if len(communities) == 0:
+                    # This pairing applies to all communities
                     matching_pairings.append(pairing)
+                    self.logger.debug(f"Pairing '{pairing.get('name')}' matches (all communities)")
+                else:
+                    # This pairing has specific communities
+                    # Since we're using community groups, we accept any pairing with communities
+                    # The actual community URL will be determined by the posting flow
+                    matching_pairings.append(pairing)
+                    self.logger.debug(f"Pairing '{pairing.get('name')}' matches (specific communities)")
             
             if not matching_pairings:
+                self.logger.debug(f"No matching content pairing for @{account_username}")
                 return None
             
             # Pick a random matching pairing
             pairing = random.choice(matching_pairings)
+            self.logger.info(f"Using content pairing: {pairing.get('name', 'Unnamed')} for @{account_username}")
             
             # Get caption IDs from pairing
             caption_ids = pairing.get('caption_ids', [])
             if not caption_ids:
+                self.logger.warning(f"Content pairing has no captions")
                 return None
             
             # Load captions
             captions_file = Path("data/captions.json")
             if not captions_file.exists():
+                self.logger.warning("No captions.json found")
                 return None
             
             all_captions = json.loads(captions_file.read_text(encoding='utf-8'))
@@ -142,6 +149,7 @@ class QueueManager:
             # Filter to only captions in this pairing
             paired_captions = [c for c in all_captions if c.get('id') in caption_ids]
             if not paired_captions:
+                self.logger.warning(f"No captions found for pairing")
                 return None
             
             # Pick random caption from pairing
@@ -187,9 +195,9 @@ class QueueManager:
             )
             
             if images:
-                self.logger.info(f"Generated paired post {post_id} with 1 image for @{account_username}")
+                self.logger.info(f"✅ Generated paired post with 1 image for @{account_username}")
             else:
-                self.logger.info(f"Generated paired text-only post {post_id} for @{account_username}")
+                self.logger.info(f"✅ Generated paired text-only post for @{account_username}")
             
             return post
             
