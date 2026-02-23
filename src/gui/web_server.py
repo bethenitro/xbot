@@ -245,9 +245,10 @@ class WebGUIServer:
                 for username, account_data in accounts.items():
                     account_list.append({
                         'username': username,
-                        'status': account_data.status,  # Use the actual status from the account
+                        'status': account_data.status,
                         'proxy': account_data.preferred_proxy or 'None',
-                        'use_proxy': account_data.use_proxy
+                        'use_proxy': account_data.use_proxy,
+                        'is_active': account_data.is_active  # Add is_active property
                     })
                 
                 return jsonify({
